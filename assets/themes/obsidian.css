@@ -1,5 +1,5 @@
 /*
- * quiet.md 文档主题：Obsidian
+ * hush.md 文档主题：Obsidian
  *
  * 按 Obsidian 默认主题的浅色模式整理（变量名沿用 Obsidian 的 --text-normal、
  * --interactive-accent 等）：紫色强调 hsl(254 80% 68%) 用于链接、勾选和 2px 引用竖线，
@@ -12,7 +12,7 @@
 :root {
   --theme-name: "Obsidian";
   --theme-name-en: "Obsidian";
-  --theme-author: "quiet.md";
+  --theme-author: "hush.md";
   --theme-description: "Obsidian 默认主题的浅色模式：紫色强调、浅灰列表符号、更大的标题与段落间距。";
   /* 块的画法：craft 或 feishu */
   --theme-base: craft;

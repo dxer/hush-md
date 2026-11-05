@@ -1378,15 +1378,24 @@ impl Workspace {
             f.set_text(&title, cx);
             f.select_all_text(cx);
         });
-        window.focus(&field.focus_handle(cx));
-        let subs = vec![cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
-            TextFieldEvent::Submit => {
+        let focus = field.focus_handle(cx);
+        window.focus(&focus);
+        let subs = vec![
+            cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
+                TextFieldEvent::Submit => {
+                    let title = w.title_edit.as_ref().map(|t| t.field.read(cx).text.clone()).unwrap_or_default();
+                    w.finish_title_edit(Some(title), window, cx);
+                }
+                TextFieldEvent::Cancel => w.finish_title_edit(None, window, cx),
+                _ => cx.notify(),
+            }),
+            // Clicking away commits, like a file manager: Enter is not the
+            // only way out of the field.
+            cx.on_blur(&focus, window, |w, window, cx| {
                 let title = w.title_edit.as_ref().map(|t| t.field.read(cx).text.clone()).unwrap_or_default();
                 w.finish_title_edit(Some(title), window, cx);
-            }
-            TextFieldEvent::Cancel => w.finish_title_edit(None, window, cx),
-            _ => cx.notify(),
-        })];
+            }),
+        ];
         self.title_edit = Some(TitleEdit { field, _subs: subs });
         cx.notify();
     }

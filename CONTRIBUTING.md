@@ -39,6 +39,17 @@ FDL_FUZZ_SEEDS=2000 cargo test --release random_edits   # 更多随机编辑，�
 | [docs/THEMES.md](docs/THEMES.md) | 文档主题的 CSS 写法：选择器、属性、命名颜色 |
 | [AGENTS.md](AGENTS.md) | 代码风格、提交前检查、测试约定 |
 
+## 美术资源
+
+图像都是脚本画出来的，改样式就改脚本再重跑，不要直接编辑生成的 PNG/JPG：
+
+```sh
+python3 tools/branding/gen_icon.py     # 应用图标：app-icon.png / .ico / 安装器 wizard-logo.bmp
+python3 tools/covers/gen_covers.py     # 官方图库的 26 张封面和缩略图
+```
+
+图标和封面都由 `build.rs` 打进二进制，重跑脚本后 `cargo build` 即可看到效果。
+
 ## 构建分发包
 
 发布前需完成 `scripts/check.sh`，并确认对应提交的 CI 通过。

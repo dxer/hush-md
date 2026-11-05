@@ -905,20 +905,35 @@ impl Workspace {
                         f.select_all_text(cx);
                         f
                     });
-                    window.focus(&field.focus_handle(cx));
-                    let subs = vec![cx.subscribe_in(&field, window, {
-                        let path = path.clone();
-                        move |w, _, ev: &TextFieldEvent, _, cx| {
-                            if matches!(ev, TextFieldEvent::Submit | TextFieldEvent::Cancel) {
-                                let name = w.folder_rename.as_ref().map(|f| f.1.read(cx).text.clone()).unwrap_or_default();
-                                w.folder_rename = None;
-                                if matches!(ev, TextFieldEvent::Submit) && !name.trim().is_empty() {
+                    let focus = field.focus_handle(cx);
+                    window.focus(&focus);
+                    let subs = vec![
+                        cx.subscribe_in(&field, window, {
+                            let path = path.clone();
+                            move |w, _, ev: &TextFieldEvent, _, cx| {
+                                if matches!(ev, TextFieldEvent::Submit | TextFieldEvent::Cancel) {
+                                    let name = w.folder_rename.as_ref().map(|f| f.1.read(cx).text.clone()).unwrap_or_default();
+                                    w.folder_rename = None;
+                                    if matches!(ev, TextFieldEvent::Submit) && !name.trim().is_empty() {
+                                        w.rename_folder(&path, &name, cx);
+                                    }
+                                    cx.notify();
+                                }
+                            }
+                        }),
+                        // Clicking away saves too, as renaming a file does.
+                        cx.on_blur(&focus, window, {
+                            let path = path.clone();
+                            move |w, _, cx| {
+                                let Some((_, field, _)) = w.folder_rename.take() else { return };
+                                let name = field.read(cx).text.clone();
+                                if !name.trim().is_empty() {
                                     w.rename_folder(&path, &name, cx);
                                 }
                                 cx.notify();
                             }
-                        }
-                    })];
+                        }),
+                    ];
                     w.folder_rename = Some((path.clone(), field, subs));
                     cx.notify();
                 }

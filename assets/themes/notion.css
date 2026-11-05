@@ -1,5 +1,5 @@
 /*
- * quiet.md 文档主题：Notion
+ * hush.md 文档主题：Notion
  *
  * 按 Notion 默认浅色页面整理：暖灰正文 #37352F、16 / 24 正文、708 宽的正文栏、
  * 系统字体、灰底红字的行内代码、无行号的米色代码块、深色引用竖线、实线分隔线、
@@ -11,7 +11,7 @@
 :root {
   --theme-name: "Notion";
   --theme-name-en: "Notion";
-  --theme-author: "quiet.md";
+  --theme-author: "hush.md";
   --theme-description: "Notion 的默认浅色页面：暖灰正文、紧凑的块、灰底红字的行内代码、深色引用竖线。";
   /* 块的画法：craft 或 feishu */
   --theme-base: craft;
