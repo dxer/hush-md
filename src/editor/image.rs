@@ -1682,7 +1682,10 @@ impl Editor {
     /// Dragged files over the page: the drop line follows the pointer.
     pub(super) fn file_drag_move(&mut self, ev: &DragMoveEvent<ExternalPaths>, _: &mut Window, cx: &mut Context<Self>) {
         let p = ev.event.position;
-        let d = if ev.bounds.contains(&p) { self.file_drop_at(p) } else { None };
+        // Markdown opens rather than inserts, so it gets no insertion line.
+        let only_notes = ev.dragged_item().downcast_ref::<ExternalPaths>()
+            .is_some_and(|d| !d.paths().is_empty() && d.paths().iter().all(|p| hush_core::vault::is_note_path(p)));
+        let d = if ev.bounds.contains(&p) && !only_notes { self.file_drop_at(p) } else { None };
         if d != self.img.file_drop {
             self.img.file_drop = d;
             cx.notify();
@@ -1697,21 +1700,28 @@ impl Editor {
     }
 
     pub(super) fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        let target = self.img.file_drop.take();
-        let fallback = || {
+        let target_at = self.img.file_drop.take();
+        // Markdown files open; they are not attachments. A drop of nothing
+        // but Markdown therefore never touches the document.
+        let (notes, rest): (Vec<&PathBuf>, Vec<&PathBuf>) = paths.paths().iter().partition(|p| hush_core::vault::is_note_path(p));
+        for note in &notes {
+            cx.emit(EditorEvent::OpenPath((*note).clone()));
+        }
+        if rest.is_empty() {
+            return;
+        }
+        let (pics, others): (Vec<&PathBuf>, Vec<&PathBuf>) = rest.iter().partition(|p| {
+            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
+            FORMATS.contains(&ext.as_str())
+        });
+        let Some(target) = target_at.map(|(t, p, _)| (t, p)).or_else(|| {
             let h = self.core.sel.head.block;
             match self.core.doc.blocks.first() {
                 Some(first) if h == TITLE => Some((first.id, DropPlace::Before)),
                 _ if self.core.block(h).is_some() => Some((h, DropPlace::After)),
                 _ => self.core.doc.blocks.last().map(|b| (b.id, DropPlace::After)),
             }
-        };
-        let target = target.map(|(t, p, _)| (t, p)).or_else(fallback);
-        // Images become image blocks, anything else an attachment after them.
-        let (pics, others): (Vec<&PathBuf>, Vec<&PathBuf>) = paths.paths().iter().partition(|p| {
-            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
-            FORMATS.contains(&ext.as_str())
-        });
+        }) else { return cx.notify() };
         let mut blocks = vec![];
         let mut err = None;
         let dir = self.note_dir();
@@ -1725,17 +1735,11 @@ impl Editor {
             self.toast(e, cx);
         }
         if !others.is_empty() {
-            let after = blocks.last().map(|b| (b.id, DropPlace::After)).or(target);
+            let after = blocks.last().map(|b| (b.id, DropPlace::After)).or(Some(target));
             self.import_files(others.into_iter().cloned().collect(), after, window, cx);
         }
         let Some(last) = blocks.last().map(|b| b.id) else { return cx.notify() };
-        match target {
-            Some((t, place)) => self.core.insert_blocks_at(blocks, t, place),
-            None => {
-                self.core.checkpoint(EditKind::Other);
-                self.core.doc.blocks.extend(blocks);
-            }
-        }
+        self.core.insert_blocks_at(blocks, target.0, target.1);
         self.core.clear_block_sel();
         self.core.cell_sel = None;
         self.core.sel = Selection::caret(Pos::new(last, 0));

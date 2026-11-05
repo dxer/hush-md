@@ -530,6 +530,52 @@ impl Workspace {
         self.try_open(id, window, cx);
     }
 
+    /// A single-file window showing another file: point the store at the new
+    /// folder and open the file there.
+    fn switch_file(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.save_before(cx, |_, _, _| ()) {
+            return;
+        }
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let dir = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        crate::store::set_root(dir);
+        cx.set_global(SharedStore::open_single_file().expect("open document"));
+        self.store = cx.global::<SharedStore>().clone();
+        self.entries = self.store.list();
+        self.folders = self.store.folders();
+        self.sort();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if self.entries.iter().any(|e| e.id == name) {
+            self.current = None;
+            self.open(&name, window, cx);
+        } else {
+            self.show_toast_kind(ToastKind::Error, crate::settings::text("无法打开文件"), cx);
+        }
+    }
+
+    /// Open a file dropped onto the page. A note inside the open library
+    /// just opens; anything else gets a window of its own, the way
+    /// double-clicking it would.
+    pub fn open_path(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let root = crate::store::Store::root_dir();
+        if let Ok(rel) = path.strip_prefix(&root) {
+            let id = rel.to_string_lossy().replace('\\', "/");
+            if self.entries.iter().any(|e| e.id == id) {
+                self.open(&id, window, cx);
+                return;
+            }
+        }
+        if self.single_file {
+            // One window, one file: the opened one replaces the current one.
+            self.switch_file(path, window, cx);
+            return;
+        }
+        match std::env::current_exe() {
+            Ok(exe) => { let _ = std::process::Command::new(exe).arg(&path).spawn(); }
+            Err(_) => self.show_toast_kind(ToastKind::Error, crate::settings::text("无法打开文件"), cx),
+        }
+    }
+
     /// Show `id`; false when it could not be opened (or the open document
     /// could not be saved first, see [`Self::save_before`]).
     pub fn try_open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -600,6 +646,7 @@ impl Workspace {
                 this.search_sel = this.default_search_sel(cx);
             }
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
+            EditorEvent::OpenPath(path) => this.open_path(path.clone(), window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
             EditorEvent::Duplicate => {
@@ -1712,6 +1759,18 @@ impl Render for Workspace {
                 if w.search_open { w.close_search(window, cx); } else { w.open_search(window, cx); }
                 cx.stop_propagation();
             }))
+            // A Markdown file dropped anywhere else in the window opens too
+            // (the editor handles its own page and stops the event there).
+            .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| {
+                let mut opened = false;
+                for p in paths.paths().iter().filter(|p| crate::vault::is_note_path(p)) {
+                    w.open_path(p.clone(), window, cx);
+                    opened = true;
+                }
+                if !opened {
+                    cx.propagate();
+                }
+            }))
             .children(crate::ui::window_controls(window))
             .children(row_menu)
             .children(doc_menu)
@@ -1804,6 +1863,11 @@ impl Workspace {
             .on_action(cx.listener(|w, _: &crate::app::ToggleSource, window, cx| w.toggle_source(window, cx)))
             .on_action(cx.listener(|w, _: &crate::app::FindInDoc, window, cx| w.find_in_doc(false, window, cx)))
             .on_action(cx.listener(|_, _: &OpenFile, _, cx| crate::open_file_dialog(cx)))
+            .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| {
+                for p in paths.paths().iter().filter(|p| crate::vault::is_note_path(p)) {
+                    w.open_path(p.clone(), window, cx);
+                }
+            }))
             .children(crate::ui::window_controls(window))
             .children(doc_menu)
             .children(confirm)

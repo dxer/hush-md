@@ -877,6 +877,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "添加到“置顶”" => "Pin",
         "下载为" => "Download as",
         "导出为" => "Export as",
+        "无法打开文件" => "Could not open the file",
         "打印" => "Print",
         "显示引用列表" => "Show references",
         "为当前窗口选择合适页宽" => "Choose a page width for this window",

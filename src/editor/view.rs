@@ -40,6 +40,8 @@ pub enum EditorEvent {
     Toast,
     /// A 创建副本 button was clicked.
     Duplicate,
+    /// A Markdown file was dropped onto the page: open it rather than embed it.
+    OpenPath(std::path::PathBuf),
 }
 
 /// A child page shown by 子页面列表 blocks.
