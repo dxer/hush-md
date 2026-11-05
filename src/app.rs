@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-actions!(workspace, [NewDoc, ImportDoc, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, GoHome, CloseWindow, Quit,
+actions!(workspace, [NewDoc, ImportDoc, OpenFile, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, GoHome, CloseWindow, Quit,
     HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen, ToggleSource]);
 
 /// The menu bar, in the interface language.
@@ -44,6 +44,7 @@ pub fn set_menus(cx: &mut App) {
             name: tr("文件", "File").into(),
             items: vec![
                 MenuItem::action(tr("新建文档", "New Document"), NewDoc),
+                MenuItem::action(tr("打开文件…", "Open File…"), OpenFile),
                 MenuItem::action(tr("新建笔记窗口", "New Note Window"), crate::quick_note::QuickNew),
                 MenuItem::action(tr("导入为文档…", "Import as Document…"), ImportDoc),
                 MenuItem::separator(),
@@ -84,6 +85,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-n", NewDoc, None),
         KeyBinding::new("cmd-shift-n", crate::quick_note::QuickNew, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
+        KeyBinding::new("cmd-o", OpenFile, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
@@ -207,6 +209,9 @@ pub struct TitleEdit {
 
 pub struct Workspace {
     pub quick_note: bool,
+    /// A window opened on one file (`hush_md notes/a.md`): no sidebar, no
+    /// home, no library — just that note, Typora style.
+    pub single_file: bool,
     pub shortcut_recording: Option<String>,
     pub shortcut_strokes: Vec<String>,
     /// The failed change: (action, message); an empty action is page-wide.
@@ -268,8 +273,6 @@ pub struct Workspace {
     /// The vault's folders (vault-relative paths), refreshed with the notes.
     pub folders: Vec<crate::vault::Folder>,
     pub move_dlg: Option<crate::tree::MoveDialog>,
-    /// 导出 Markdown 设置.
-    pub export_md: Option<crate::transfer::ExportMd>,
     /// 编辑 / 阅读 dropdown, and the mode button's last-frame bounds.
     pub mode_menu: bool,
     pub mode_btn_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -312,9 +315,33 @@ impl Workspace {
         Self::build_window(true, document, window, cx)
     }
 
+    /// A window for one file, Typora style: its folder is the vault (so the
+    /// note and an `assets/` beside it resolve normally), the sidebar is
+    /// hidden, and only this note is shown.
+    pub fn new_file_window(path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let dir = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        crate::store::set_root(dir);
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut ws = Self::build_window_seeded(false, Some(name), false, window, cx);
+        ws.single_file = true;
+        ws.sidebar_open = false;
+        ws
+    }
+
     fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build_window_seeded(quick, document, true, window, cx)
+    }
+
+    /// `seed` writes a welcome note into a folder that has none. A file
+    /// window never does: the user asked to open one file, not to set up a
+    /// library in the folder it happens to sit in.
+    fn build_window_seeded(quick: bool, document: Option<String>, seed: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::settings::load();
-        if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
+        if !cx.has_global::<SharedStore>() {
+            let store = if seed { SharedStore::open() } else { SharedStore::open_single_file() };
+            cx.set_global(store.expect("open document library"));
+        }
         let mut store = cx.global::<SharedStore>().clone();
         let entries = store.list();
         let folders = store.folders();
@@ -393,6 +420,7 @@ impl Workspace {
         let sidebar_width = store.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
         let mut ws = Workspace {
             quick_note: quick,
+            single_file: false,
             shortcut_recording: None,
             shortcut_strokes: vec![],
             shortcut_error: None,
@@ -439,7 +467,6 @@ impl Workspace {
             folded: [false; 2],
             expanded: HashSet::new(),
             move_dlg: None,
-            export_md: None,
             focus: cx.focus_handle(),
             save_task: None,
             unsaved: false,
@@ -825,6 +852,10 @@ impl Workspace {
 
     /// Switch the main pane to 主页 or back to the document.
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
+        // A single-file window has no home or library to show.
+        if self.single_file && view != View::Doc {
+            return;
+        }
         self.cancel_shortcut_recording(cx);
         self.view = view;
         self.row_menu = None;
@@ -1511,6 +1542,13 @@ impl Workspace {
                     .items_center()
                     .when(self.current.is_some(), |d| {
                         d.child(
+                            // 渲染视图 ⇄ 源码视图, the same toggle as ⌘⇧M.
+                            seg("doc-source", if self.source_view(cx) { "file-text" } else { "code" })
+                                .relative()
+                                .tip_label(crate::settings::tr(if self.source_view(cx) { "渲染视图" } else { "源码视图" }, if self.source_view(cx) { "Rendered view" } else { "Source view" }).into(), TipSide::Below)
+                                .on_click(cx.listener(|w, _, window, cx| w.toggle_source(window, cx))),
+                        )
+                        .child(
                             // No tooltip while its dropdown is open; the menu hangs
                             // from this button's right edge.
                             seg("doc-more", "ellipsis")
@@ -1544,6 +1582,10 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // One file, one window: nothing but the page and its top bar.
+        if self.single_file {
+            return self.render_single_file(window, cx).into_any_element();
+        }
         self.native_sidebar.sync(if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
@@ -1585,7 +1627,6 @@ impl Render for Workspace {
             View::Settings => self.render_settings(cx),
         };
         let move_dlg = self.render_move_dialog(cx);
-        let export_md = self.render_export_md(cx);
         // Only the note stands out: a white plane flush with the window's top,
         // right and bottom edges. The sidebar sits sunken on the window
         // surface beside it; the change of value is the only line between
@@ -1593,18 +1634,8 @@ impl Render for Workspace {
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
         let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).child(main);
-        div()
-            .id("workspace")
-            .key_context("Workspace")
-            .track_focus(&self.focus)
-            .relative()
-            .size_full()
-            .flex()
-            .bg(Theme::window())
-            .font_family(theme::UI_FONT)
-            .text_color(Theme::text())
-            // Window keys act on the window they were pressed in, not on
-            // whichever window macOS considers active.
+        self.window_root(sidebar.map(IntoElement::into_any_element), note.into_any_element(), window, cx)
+            .children(resize)
             .on_action(cx.listener(|w, _: &CloseWindow, window, cx| {
                 crate::quick_note::persist(cx);
                 if w.save_before(cx, |_, window, _| window.remove_window()) { window.remove_window(); }
@@ -1617,6 +1648,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &GoHome, _, cx| w.show_view(View::Home, cx)))
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
+            .on_action(cx.listener(|_, _: &OpenFile, _, cx| crate::open_file_dialog(cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 w.sidebar_open = !w.sidebar_open;
                 cx.notify();
@@ -1658,10 +1690,9 @@ impl Render for Workspace {
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
                 if w.record_shortcut(ev, cx) { return; }
                 // Esc cancels a confirmation dialog.
-                if ev.keystroke.key == "escape" && (w.confirm.is_some() || w.export_md.is_some()) {
+                if ev.keystroke.key == "escape" && w.confirm.is_some() {
                     w.confirm = None;
                     w.after_save = None;
-                    w.export_md = None;
                     cx.stop_propagation();
                     cx.notify();
                     return;
@@ -1681,9 +1712,6 @@ impl Render for Workspace {
                 if w.search_open { w.close_search(window, cx); } else { w.open_search(window, cx); }
                 cx.stop_propagation();
             }))
-            .children(sidebar)
-            .child(note)
-            .children(resize)
             .children(crate::ui::window_controls(window))
             .children(row_menu)
             .children(doc_menu)
@@ -1693,14 +1721,106 @@ impl Render for Workspace {
             .children(theme_menu)
             .children(confirm)
             .children(move_dlg)
-            .children(export_md)
             .children(search)
             .children(resize_overlay)
             .children(toast)
+            .into_any_element()
     }
 }
 
 impl Workspace {
+    /// The window's outermost element: what every mode shares. `side` is the
+    /// sidebar (empty in a single-file window) and `page` the note.
+    fn window_root(&self, side: Option<AnyElement>, page: AnyElement, _window: &mut Window, _cx: &mut Context<Self>) -> Stateful<Div> {
+        div()
+            .id("workspace")
+            .key_context("Workspace")
+            .track_focus(&self.focus)
+            .relative()
+            .size_full()
+            .flex()
+            .bg(Theme::window())
+            .font_family(theme::UI_FONT)
+            .text_color(Theme::text())
+            .children(side)
+            .child(page)
+    }
+
+    /// A window opened on one file: the top bar with the note's name and the
+    /// page below it, nothing else. ⌘⇧M still switches to the source view.
+    fn render_single_file(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = self.current.as_ref()
+            .and_then(|id| self.entries.iter().find(|e| &e.id == id))
+            .map(|e| display_title(&e.title))
+            .unwrap_or_else(|| self.note_file_name());
+        let save_error = match &self.status {
+            SaveStatus::Failed(error) => Some(error.clone()),
+            _ => None,
+        };
+        let seg = crate::ui::header_icon;
+        let bar = div()
+            .id("top-bar").relative()
+            .h(px(HEADER_H))
+            .flex_none()
+            .flex()
+            .items_center()
+            .pr(px(crate::ui::header_right_inset()))
+            .pl(px(theme::TRAFFIC_LIGHTS_W))
+            .title_bar()
+            .child(
+                div().min_w_0().flex_1().flex().items_center().gap(px(12.))
+                    .child(div().h(px(20.)).min_w_0().flex().items_center().text_size(px(13.)).line_height(px(20.)).child(self.title_el(title, cx)))
+                    .when_some(save_error, |d, error| d.child(
+                        div().min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
+                            .text_color(theme::c(craft::R400)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(error),
+                    )),
+            )
+            .child(div().gap(px(4.)).h(px(HEADER_ACTIONS_H)).flex_none().flex().items_center()
+                .child(seg("doc-source", if self.source_view(cx) { "file-text" } else { "code" })
+                    .tip_label(crate::settings::tr(if self.source_view(cx) { "渲染视图" } else { "源码视图" }, if self.source_view(cx) { "Rendered view" } else { "Source view" }).into(), TipSide::Below)
+                    .on_click(cx.listener(|w, _, window, cx| w.toggle_source(window, cx))))
+                .child(seg("doc-more", "ellipsis")
+                    .relative()
+                    .when(self.doc_menu, |d| d.bg(Theme::fill_hover()))
+                    .when(!self.doc_menu, |d| d.tip(crate::settings::tr("更多", "More"), None))
+                    .on_click(cx.listener(|w, _, _, cx| {
+                        w.doc_menu = !w.doc_menu;
+                        w.doc_sub = None;
+                        cx.notify();
+                    }))));
+        let page = crate::editor_theme::Theme::bg_body();
+        let body = div().flex_1().min_h_0().flex().child(
+            div().relative().flex_1().min_w_0().h_full().children(self.editor.clone()),
+        );
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().flex_col().bg(page)
+            .child(bar).child(body);
+        let doc_menu = self.render_doc_menu(window, cx);
+        let confirm = self.render_confirm(cx);
+        let toast = self.render_toast(window);
+        self.window_root(None, note.into_any_element(), window, cx)
+            .on_action(cx.listener(|w, _: &CloseWindow, window, cx| {
+                if w.save_before(cx, |_, window, _| window.remove_window()) { window.remove_window(); }
+            }))
+            .on_action(cx.listener(|w, _: &crate::app::ToggleSource, window, cx| w.toggle_source(window, cx)))
+            .on_action(cx.listener(|w, _: &crate::app::FindInDoc, window, cx| w.find_in_doc(false, window, cx)))
+            .on_action(cx.listener(|_, _: &OpenFile, _, cx| crate::open_file_dialog(cx)))
+            .children(crate::ui::window_controls(window))
+            .children(doc_menu)
+            .children(confirm)
+            .children(toast)
+    }
+
+    /// The file name of the open note, for a window that has no library to
+    /// take a title from.
+    fn note_file_name(&self) -> String {
+        self.current.as_deref().and_then(|id| id.rsplit('/').next()).map(crate::vault::stem_of).unwrap_or_default()
+    }
+
+    /// Whether the open note is showing its Markdown source.
+    pub(crate) fn source_view(&self, cx: &App) -> bool {
+        self.editor.as_ref().is_some_and(|e| e.read(cx).source)
+    }
+
     /// ⌘/ : show the open note as Markdown source, or go back to the page.
     pub fn toggle_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ed) = self.editor.clone() else { return };

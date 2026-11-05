@@ -291,6 +291,12 @@ impl Editor {
         cx.notify();
     }
 
+    /// The folder the open note lives in, vault-relative (`""` at the root).
+    /// Pasted images go into `assets/` there.
+    pub fn note_dir(&self) -> String {
+        self.note_path.as_deref().and_then(|p| p.rsplit_once('/').map(|(d, _)| d.to_string())).unwrap_or_default()
+    }
+
     pub fn new(doc: Document, modified: u64, page_width: PageWidth, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let link_field = cx.new(|cx| {
             let mut f = TextField::new("粘贴或输入链接", cx);
@@ -980,7 +986,8 @@ impl Editor {
     }
 
     fn insert_image_bytes(&mut self, bytes: &[u8], ext: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let b = match super::image::image_block_from(bytes, ext) {
+        let dir = self.note_dir();
+        let b = match super::image::image_block_from(bytes, ext, &dir) {
             Ok(b) => b,
             Err(msg) => return self.toast(msg, cx),
         };
@@ -1864,7 +1871,8 @@ impl Editor {
         };
         let html = html.filter(|_| !plain && rich_target).map(|h| {
             let mut b = crate::paste::html_to_blocks(&h);
-            super::image::localize_pasted_images(&mut b);
+            let dir = self.note_dir();
+            super::image::localize_pasted_images(&mut b, &dir);
             b
         });
         // HTML that only restates the text (a lone link to it, or the text

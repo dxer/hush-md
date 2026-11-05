@@ -47,7 +47,7 @@ impl Preferences {
     }
 }
 
-fn path() -> std::path::PathBuf { crate::store::Store::root_dir().join("preferences.json") }
+fn path() -> std::path::PathBuf { crate::vault::Vault::data_root().join("preferences.json") }
 
 pub fn load() {
     let p = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
@@ -70,7 +70,7 @@ pub fn prefs() -> Preferences {
 
 fn save(p: &Preferences) -> anyhow::Result<()> {
     use std::io::Write;
-    let root = crate::store::Store::root_dir();
+    let root = crate::vault::Vault::data_root();
     std::fs::create_dir_all(&root)?;
     let tmp = root.join("preferences.json.tmp");
     let mut f = std::fs::File::create(&tmp)?;
@@ -436,6 +436,33 @@ impl Workspace {
         refresh_all(self, cx);
     }
 
+    /// 设置 → 文档库 → 图片存放位置: write the folder pasted images go into
+    /// (empty: `assets/` beside the notes).
+    pub(crate) fn set_assets_dir(&mut self, dir: String, cx: &mut Context<Self>) {
+        let mut s = self.store.settings();
+        s.assets_dir = dir;
+        if let Err(e) = self.store.save_settings(&s) {
+            self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {e}", tr("设置保存失败", "Could not save settings")), cx);
+            return;
+        }
+        cx.notify();
+    }
+
+    fn pick_assets_dir(&mut self, cx: &mut Context<Self>) {
+        let picked = crate::devtools::take_pick().and_then(|p| p.into_iter().next());
+        let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some(tr("选择图片文件夹", "Choose an images folder").into()), extensions: None }));
+        cx.spawn(async move |this, cx| {
+            let dir = match prompt {
+                Some(rx) => rx.await.ok().and_then(Result::ok).flatten().and_then(|p| p.into_iter().next()),
+                None => picked,
+            };
+            if let Some(dir) = dir {
+                let _ = this.update(cx, |w, cx| w.set_assets_dir(dir.to_string_lossy().into_owned(), cx));
+            }
+        })
+        .detach();
+    }
+
     /// Open the theme's stylesheet in the user's editor; a built-in theme is
     /// first copied in full into the themes folder (the copy replaces it).
     fn edit_theme(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -578,8 +605,9 @@ impl Workspace {
         drop(list);
         let errors = themes::errors();
         let where_: SharedString = match &sel_path {
-            // Inside the library: the short path (the full one wraps on narrow windows).
-            Some(p) => p.strip_prefix(crate::store::Store::root_dir()).unwrap_or(p).display().to_string().into(),
+            // In the app's data folder: the short path from `~` (the full one
+            // wraps on narrow windows).
+            Some(p) => dirs::home_dir().and_then(|h| p.strip_prefix(&h).ok().map(|r| format!("~/{}", r.display()))).unwrap_or_else(|| p.display().to_string()).into(),
             None => tr("内置主题", "Built in").into(),
         };
         let (edit_id, dup_id, rm_id, open_id) = (sel_id.clone(), sel_id.clone(), sel_id.clone(), sel_id);
@@ -616,7 +644,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn library_page(&self, _cx: &mut Context<Self>) -> AnyElement {
+    fn library_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let root = crate::store::Store::root_dir();
         let location = if cfg!(target_os = "windows") { root.display().to_string() } else {
             dirs::home_dir().and_then(|h| root.strip_prefix(h).ok().map(|r| format!("~/{}", r.display()))).unwrap_or_else(|| root.display().to_string())
@@ -624,6 +652,16 @@ impl Workspace {
         let reveal = if cfg!(target_os = "macos") { tr("在访达中显示", "Show in Finder") } else if cfg!(target_os = "windows") {
             tr("在文件资源管理器中显示", "Show in File Explorer")
         } else { tr("在文件管理器中显示", "Show in File Manager") };
+        // 图片存放位置: beside the notes, or a folder picked here.
+        let custom = self.store.settings().assets_dir.clone();
+        let assets_desc: SharedString = if custom.is_empty() {
+            tr("粘贴的图片和附件放在笔记旁边的 assets/ 文件夹，Markdown 里写相对路径，整个文件夹可以一起搬走。", "Pasted images and attachments go into an assets/ folder beside the note. The Markdown uses a relative path, so the folder can be moved as a whole.").into()
+        } else {
+            dirs::home_dir().and_then(|h| std::path::Path::new(&custom).strip_prefix(&h).ok().map(|r| format!("~/{}", r.display()))).unwrap_or(custom.clone()).into()
+        };
+        let assets_control = div().flex().items_center().gap(px(8.))
+            .when(!custom.is_empty(), |d| d.child(link_button("assets-reset", tr("恢复默认", "Restore")).on_click(cx.listener(|w, _, _, cx| w.set_assets_dir(String::new(), cx)))))
+            .child(button("assets-pick", tr("选择文件夹", "Choose…")).on_click(cx.listener(|w, _, _, cx| w.pick_assets_dir(cx))));
         div().w_full().flex().flex_col().gap(px(8.))
             .child(group(None, vec![
                 row(tr("笔记文件夹", "Notes folder"), Some(location.into()),
@@ -633,6 +671,7 @@ impl Workspace {
                     Some(tr("每篇笔记就是文件夹里的一个 .md 或 .markdown 文件，可以用任何编辑器打开，也可以用 Git 同步。", "Every note is a .md or .markdown file in the folder. Open it in any editor and sync it with Git.").into()),
                     div(),
                 ).into_any_element(),
+                row(tr("图片存放位置", "Images folder"), Some(assets_desc), assets_control).into_any_element(),
             ]))
             .into_any_element()
     }
@@ -709,6 +748,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "导入" => "Import",
         "导出" => "Export",
         "下载" => "Download",
+        "保存副本" => "Save a copy",
         "移动到" => "Move to",
         "添加到收藏" => "Add to favorites",
         "取消收藏" => "Remove from favorites",
@@ -836,6 +876,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "从“置顶”移除" => "Unpin",
         "添加到“置顶”" => "Pin",
         "下载为" => "Download as",
+        "导出为" => "Export as",
         "打印" => "Print",
         "显示引用列表" => "Show references",
         "为当前窗口选择合适页宽" => "Choose a page width for this window",

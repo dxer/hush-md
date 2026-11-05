@@ -8,6 +8,9 @@ pub struct SharedStore(Rc<RefCell<Store>>);
 impl gpui::Global for SharedStore {}
 impl SharedStore {
     pub fn open() -> Result<Self> { Ok(Self(Rc::new(RefCell::new(Store::open()?)))) }
+    /// For a window opened on one file: the folder is the vault, and nothing
+    /// is written into it.
+    pub fn open_single_file() -> Result<Self> { Ok(Self(Rc::new(RefCell::new(Store::open_seeded(Store::root_dir(), false)?)))) }
     pub fn take_warnings(&self) -> Vec<String> { std::mem::take(&mut self.0.borrow_mut().warnings) }
     pub fn list(&mut self) -> Vec<Entry> { self.0.borrow_mut().list() }
     pub fn folders(&self) -> Vec<hush_core::vault::Folder> { self.0.borrow().folders() }

@@ -84,7 +84,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `source.rs` | block 的磁盘来源、原文、空行、指纹 |
 | `md.rs` | Markdown 解析、无损写回、序列化、标题提取 |
 | `vault.rs` | 文件夹扫描、读写文件、新建 / 重命名 / 删除、文件名校验；删除走系统回收站 |
-| `store.rs` | 在 `vault` 之上提供 `Entry` / `Meta` 和每篇笔记的设置（没有应用内回收站，删除只经过 `vault`） |
+| `store.rs` | 在 `vault` 之上提供 `Entry` / `Meta` 和每篇笔记的设置（没有应用内回收站，删除只经过 `vault`；元数据写在应用数据目录） |
 | `paste.rs` | HTML / Markdown 粘贴（含从飞书、网页粘贴） |
 | `docxml.rs` | DocxXML 读写，只用于和飞书互通，不再是存储格式 |
 | `markdown.rs` | 导出 Markdown（另一种选项集） |
@@ -105,6 +105,15 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 - 解析失败（语法错误、不认识的图类型）时退回普通代码块，源码始终可编辑。
 - 文件里保存的永远是那段图表源码，`md.rs` 的往返测试覆盖了这一点。
 
+## 打开一个文件
+
+`hush_md 笔记.md`、Finder / 资源管理器里双击，或应用内的「打开文件…」都走 `main.rs` 的 `open_file_window`：一个新窗口，`Workspace::single_file` 为真，没有侧栏、主页和搜索，只有顶栏和这一篇。
+
+- 文件的**所在文件夹**被当作笔记库（`store::set_root`），所以笔记旁边的 `assets/`、相对链接都按 Markdown 的规矩解析。
+- 这个选择是进程级的，所以运行中再打开文件会**另起一个进程**，不会把已打开的资料库指到别处。
+- 单文件窗口不播种欢迎笔记，也不往文件夹里写任何东西。
+- 安装包声明了 `.md` / `.markdown` 的文件类型（macOS `CFBundleDocumentTypes`，Windows `OpenWithProgids`），系统才会把双击交给我们。
+
 ## 界面语言
 
 界面支持简体中文与英文，偏好保存在 `Preferences::english`。静态文案用 `settings::text` / `label` 的映射，成对文案用 `settings::tr`，带参数用 `localized_format!`。用户写的笔记内容不是翻译键。
@@ -114,6 +123,6 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 hush.md 起步时借鉴了 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT，作者 s1dashu）：界面、块模型和编辑内核来自那里。此后两边独立演进，**本仓库不跟踪 quiet.md 的更新**，没有上游同步脚本或 merge 记录。
 
 - **来自 quiet.md 的部分**：`model.rs` 的块模型、`editor/core.rs` 的编辑内核和撤销栈、表格操作、`theme.rs` / `ui.rs` / `settings.rs` / `home.rs` / `sidebar.rs` 等界面骨架、`docxml.rs`、`feishu_theme.rs`、`palette.rs`，以及 `vendor/` 三个本地补丁（注释仍写 `quiet.md:`）。
-- **hush.md 独有的部分**：`md.rs`（Markdown 解析与无损写回）、`source.rs`（逐字节保留策略）、`vault.rs` / `store.rs` 的文件夹库、系统回收站删除、`.hush/` 布局。
+- **hush.md 独有的部分**：`md.rs`（Markdown 解析与无损写回）、`source.rs`（逐字节保留策略）、`vault.rs` / `store.rs` 的文件夹库、系统回收站删除、元数据放在应用数据目录的布局。
 - **手工回移**：如果 quiet.md 修了编辑内核的 bug，需要自己对照那一个提交改过来，并补一次 `scripts/check.sh`；没有自动机制。
 

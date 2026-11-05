@@ -974,7 +974,7 @@ impl Workspace {
                     .into_any_element(),
             ];
         }
-        // Hovering 下载 opens its submenu; hovering any other item closes it.
+        // Hovering 导出为 opens its submenu; hovering any other item closes it.
         let set_sub = |open: bool| {
             cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
                 if let Some(m) = w.row_menu.as_mut().filter(|m| *hovered && m.sub != open) {
@@ -1033,7 +1033,7 @@ impl Workspace {
             )
             .child(divider())
             .child(
-                item("rm-download", "export", crate::settings::text("下载"))
+                item("rm-download", "export", crate::settings::text("导出为"))
                     .when(m.sub, |d| d.bg(Theme::menu_highlight()).text_color(gpui::white()))
                     .child(icon("chevron-right", 10., if m.sub { gpui::white() } else { Theme::text_caption() }).group_hover("rm-download", |s| s.text_color(gpui::white())))
                     .on_hover(set_sub(true)),
@@ -1075,7 +1075,7 @@ impl Workspace {
         if m.sub {
             let record = self.row_sub_bounds.clone();
             record.set(None);
-            // Level the submenu's first item with 下载 (the 5th item, after one divider).
+            // Level the submenu's first item with 导出为 (the 5th item, after one divider).
             let top = menu_top + 4. * ROW_ITEM + ROW_DIVIDER;
             let left = match corner {
                 Corner::TopRight | Corner::BottomRight => origin.x - px(ROW_MENU_W),
@@ -1093,7 +1093,7 @@ impl Workspace {
                             .py(px(crate::ui::MENU_PAD_Y))
                             .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
                             .when(crate::printing::SUPPORTED, |d| d.child(crate::docmenu::sub_item("rm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))
-                            .child(crate::docmenu::sub_item("rm-md", "Markdown").on_click(cx.listener(move |w, _, _, cx| w.open_export_md(&dl, cx)))),
+                            .child(crate::docmenu::sub_item("rm-html", "HTML").on_click(cx.listener(move |w, _, window, cx| w.export_html(&dl, window, cx)))),
                     ),
                 )
                 .with_priority(2)

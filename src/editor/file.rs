@@ -243,7 +243,7 @@ fn thumb_dir(p: &Path) -> PathBuf {
         m.len().hash(&mut h);
         m.modified().ok().hash(&mut h);
     }
-    Store::assets_dir().join("thumbs").join(format!("{:016x}", h.finish()))
+    Store::ensure_cache_dir().join("thumbs").join(format!("{:016x}", h.finish()))
 }
 
 fn first_png(dir: &Path) -> Option<PathBuf> {
@@ -277,11 +277,12 @@ pub fn quick_look(p: &Path) {
     });
 }
 
-/// A new attachment for `p`, copied into `.hush/assets/files/<uuid>/<name>`.
-fn file_block_from_path(p: &Path) -> Option<Block> {
+/// A new attachment for `p`, copied into `assets/files/<uuid>/<name>` (the
+/// folder picked for images, else `assets/` beside the note).
+fn file_block_from_path(p: &Path, note_dir: &str) -> Option<Block> {
     let name = p.file_name()?.to_string_lossy().to_string();
     let size = std::fs::metadata(p).ok().filter(|m| m.is_file())?.len();
-    let dir = Store::assets_dir().join("files").join(uuid::Uuid::new_v4().to_string());
+    let dir = super::image::assets_target(note_dir).0.join("files").join(uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir).ok()?;
     let dest = dir.join(&name);
     std::fs::copy(p, &dest).ok()?;
@@ -787,7 +788,7 @@ impl Editor {
             n += 1;
         }
         bar = bar
-            .child(shell_btn("ftb-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
+            .child(shell_btn("ftb-download").tip_above(crate::settings::text("保存副本"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
                 MouseButton::Left,
                 act(|e, id, _, cx| {
                     if let Some(BlockKind::File(f)) = e.core.kind_of(id).cloned() {
@@ -861,7 +862,7 @@ impl Editor {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(shell_btn("fcard-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
+            .child(shell_btn("fcard-download").tip_above(crate::settings::text("保存副本"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
@@ -926,7 +927,8 @@ impl Editor {
     /// Copies `paths` into the library off the main thread, then inserts
     /// them at `target` (or the caret).
     pub(super) fn import_files(&mut self, paths: Vec<PathBuf>, target: Option<(BlockId, DropPlace)>, window: &mut Window, cx: &mut Context<Self>) {
-        let task = cx.background_executor().spawn(async move { paths.iter().map(|p| file_block_from_path(p)).collect::<Vec<_>>() });
+        let dir = self.note_dir();
+        let task = cx.background_executor().spawn(async move { paths.iter().map(|p| file_block_from_path(p, &dir)).collect::<Vec<_>>() });
         cx.spawn_in(window, async move |this, cx| {
             let blocks = task.await;
             let _ = this.update_in(cx, |e, window, cx| {

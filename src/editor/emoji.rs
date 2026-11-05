@@ -208,7 +208,7 @@ struct State {
 }
 
 fn state_path() -> std::path::PathBuf {
-    crate::store::Store::root_dir().join("emoji.json")
+    crate::vault::Vault::data_root().join("emoji.json")
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| {

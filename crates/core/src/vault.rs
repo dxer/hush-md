@@ -7,8 +7,10 @@
 //! atomically. Deleting a note moves it to the system trash (Finder,
 //! Explorer, freedesktop), so it can be brought back outside the app.
 //!
-//! Everything the app creates lives under `.hush/` in the vault: settings,
-//! per-note preferences, copied images and attachments, and theme files.
+//! What the app creates is kept out of the user's folders: settings and
+//! per-note preferences live in the app's data directory, keyed by the
+//! vault's path (see `meta_root`). Copied images and attachments are the one
+//! exception — they are part of the note, so they sit in `assets/` beside it.
 
 use crate::model::{display_title, Document};
 use anyhow::{Context, Result};
@@ -88,6 +90,9 @@ pub type Settings = crate::store::Settings;
 
 pub struct Vault {
     root: PathBuf,
+    /// Where this vault's settings and per-note preferences live: outside the
+    /// folder, in the app's data directory.
+    meta: PathBuf,
     settings: Settings,
     /// Titles found on the last scan, so the sidebar does not reopen files.
     titles: HashMap<String, (u64, String)>,
@@ -116,29 +121,50 @@ impl Vault {
             .unwrap_or_else(|| dirs::document_dir().or_else(|| dirs::home_dir().map(|h| h.join("Documents"))).unwrap_or_else(|| PathBuf::from(".")).join("Hush.md"))
     }
 
+    /// The app's own data directory: `~/Library/Application Support/hush.md`
+    /// on macOS, `%APPDATA%\hush.md` on Windows, `$XDG_DATA_HOME/hush.md`
+    /// elsewhere. `HUSH_MD_DATA` overrides it (tests use a temp folder).
+    ///
+    /// Settings used to sit in `<vault>/.hush/`; [`Self::open`] moves them
+    /// here the first time an old vault is opened, and leaves nothing behind.
+    pub fn data_root() -> PathBuf {
+        if let Some(p) = std::env::var_os("HUSH_MD_DATA") {
+            return PathBuf::from(p);
+        }
+        dirs::data_dir().or_else(|| dirs::home_dir().map(|h| h.join(".local/share"))).unwrap_or_else(|| PathBuf::from(".")).join("hush.md")
+    }
+
+    /// Where one vault's settings live: a folder named after the vault's
+    /// absolute path, so two folders with the same name do not share them.
+    pub fn meta_root(root: &Path) -> PathBuf {
+        let abs = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        Self::data_root().join("vaults").join(vault_key(&abs))
+    }
+
     pub fn open(root: PathBuf) -> Result<Self> {
+        let meta = Self::meta_root(&root);
+        Self::open_at(root, meta)
+    }
+
+    /// Open `root` with its settings in `meta` (a test picks both).
+    pub fn open_at(root: PathBuf, meta: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&root).with_context(|| format!("无法创建文件夹 {}", root.display()))?;
-        let settings = Self::load_settings(&root);
-        Ok(Vault { root, settings, titles: HashMap::new(), warnings: vec![] })
+        migrate_meta(&root, &meta);
+        let settings = load_settings(&meta);
+        Ok(Vault { root, meta, settings, titles: HashMap::new(), warnings: vec![] })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    fn meta_dir(&self) -> PathBuf {
-        self.root.join(".hush")
+    /// This vault's settings folder (outside `root`).
+    pub fn meta_dir(&self) -> &Path {
+        &self.meta
     }
 
     fn settings_path(&self) -> PathBuf {
-        self.meta_dir().join("settings.json")
-    }
-
-    fn load_settings(root: &Path) -> Settings {
-        std::fs::read(root.join(".hush/settings.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        self.meta.join("settings.json")
     }
 
     pub fn settings(&self) -> &Settings {
@@ -147,7 +173,7 @@ impl Vault {
 
     pub fn save_settings(&mut self, s: Settings) -> Result<()> {
         self.settings = s;
-        std::fs::create_dir_all(self.meta_dir())?;
+        std::fs::create_dir_all(&self.meta)?;
         write_atomic(&self.settings_path(), &serde_json::to_vec_pretty(&self.settings)?)
     }
 
@@ -516,6 +542,70 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// A stable folder name for a vault's absolute path: readable, and with a
+/// hash so `/a/Notes` and `/b/Notes` stay apart.
+fn vault_key(abs: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    abs.to_string_lossy().hash(&mut h);
+    let slug: String = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "vault".into())
+        .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(40).collect();
+    format!("{}-{:08x}", if slug.is_empty() { "vault" } else { &slug }, h.finish() as u32)
+}
+
+fn load_settings(meta: &Path) -> Settings {
+    std::fs::read(meta.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Move a vault's settings out of `<vault>/.hush/` into `meta`, once.
+///
+/// Older builds kept everything in the note folder. Anything still there is
+/// copied over (unless the new location already has it) and the folder is
+/// removed, so the user's folder keeps only their own files. `assets/` moved
+/// out earlier and is left alone: pasted images are the note's own files now.
+fn migrate_meta(root: &Path, meta: &Path) {
+    let old = root.join(".hush");
+    if !old.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(meta);
+    for name in ["settings.json", "notes.json", "format.json", "preferences.json", "shortcuts.json", "emoji.json"] {
+        let from = old.join(name);
+        let to = meta.join(name);
+        if from.is_file() && !to.exists() {
+            let _ = std::fs::copy(&from, &to);
+        }
+    }
+    // Themes are CSS the user may have edited; keep them.
+    for dir in ["themes", "assets"] {
+        let from = old.join(dir);
+        if !from.is_dir() {
+            continue;
+        }
+        let to = meta.join(dir);
+        if let Ok(rd) = std::fs::read_dir(&from) {
+            for e in rd.flatten() {
+                let target = to.join(e.file_name());
+                if !target.exists() {
+                    let _ = std::fs::create_dir_all(&to);
+                    let _ = std::fs::copy(e.path(), &target);
+                }
+            }
+        }
+    }
+    // Attachments copied into `.hush/assets/files/<uuid>/` are referenced by
+    // absolute path, so they can just move.
+    let files = old.join("assets").join("files");
+    if files.is_dir() {
+        let _ = std::fs::create_dir_all(meta.join("assets"));
+        let _ = std::fs::rename(&files, meta.join("assets").join("files"));
+    }
+    // Only now that everything is copied: drop the old folder so the note
+    // folder stops showing it. A failure here leaves it in place, which is
+    // harmless — the next open tries again.
+    let _ = std::fs::remove_dir_all(&old);
 }
 
 #[cfg(test)]

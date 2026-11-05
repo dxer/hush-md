@@ -1,23 +1,14 @@
-//! 导入 / 导出: 下载为 → PDF / Markdown (with the 导出 Markdown 设置
-//! dialog), 打印, and 导入为文档 (主页's 上传, the app menu): local Markdown
-//! or DocxXML files picked straight away. The Word / PDF settings and
-//! 打印选项 only choose what happens to comments, so they are left out.
+//! 导入 / 导出: 导出为 → PDF / HTML, 打印, and 导入为文档 (主页's 上传, the
+//! app menu): local Markdown or DocxXML files picked straight away.
 
 use crate::app::Workspace;
 use crate::settings::display_title;
 use crate::model::{Block, BlockKind, Document, RichText};
 use crate::printing::{self, Job};
 use crate::theme::Theme;
-use crate::dialogs::{close_button, dialog, primary_button, scrim, secondary_button};
 use crate::ui::ToastKind;
 use gpui::{prelude::FluentBuilder, *};
 use std::path::{Path, PathBuf};
-
-/// The open 导出 Markdown 设置 dialog: the page, and 所有内容 picked.
-pub struct ExportMd {
-    pub id: String,
-    pub all: bool,
-}
 
 const MARKDOWN_EXTS: [&str; 4] = ["md", "markdown", "mark", "txt"];
 
@@ -57,24 +48,6 @@ fn file_name(doc: &Document) -> String {
     display_title(&doc.title.text).replace(['/', ':', '\\'], "_")
 }
 
-/// The modal mask (the window dimmed) and its dialog.
-fn mask(id: &'static str, dialog: impl IntoElement, close: impl Fn(&mut Workspace, &mut Context<Workspace>) + 'static, cx: &mut Context<Workspace>) -> AnyElement {
-    deferred(
-        div()
-            .id(id)
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(scrim())
-            .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| close(w, cx)))
-            .child(dialog),
-    )
-    .with_priority(3)
-    .into_any_element()
-}
-
 /// 16px radio: the accent with a white dot when checked, else a white disc
 /// with the task box's rim.
 pub(crate) fn radio(on: bool) -> Div {
@@ -90,7 +63,7 @@ pub(crate) fn radio(on: bool) -> Div {
 }
 
 /// Percent-escapes in a Markdown link (`%20` and friends).
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -145,7 +118,7 @@ pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
     if let Some(dir) = path.parent() {
         resolve_images(&mut blocks, dir);
     }
-    crate::editor::image::localize_pasted_images(&mut blocks);
+    crate::editor::image::localize_pasted_images(&mut blocks, "");
     if blocks.is_empty() {
         blocks.push(Block::text(""));
     }
@@ -164,51 +137,29 @@ impl Workspace {
         crate::tree::Tree::new(&self.entries).children(Some(id)).iter().map(|e| e.title.clone()).collect()
     }
 
-    /// 下载为 → Markdown: the 导出 Markdown 设置 first.
-    pub fn open_export_md(&mut self, id: &str, cx: &mut Context<Self>) {
+    /// 导出为 → HTML: one self-contained page (images inlined), saved where
+    /// the user picks. The same page PDF and 打印 are laid out from.
+    pub fn export_html(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
-        self.export_md = Some(ExportMd { id: id.to_string(), all: false });
-        cx.notify();
-    }
-
-    /// 导出: the .md where the user picks; 所有内容 copies local images into
-    /// `<name>.assets` beside it.
-    fn export_markdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ExportMd { id, all }) = self.export_md.take() else { return };
-        cx.notify();
-        let Some(doc) = self.doc_of(&id, cx) else { return };
-        let subs = self.sub_page_titles(&id);
-        let path = save_path(&format!("{}.md", file_name(&doc)), cx);
+        let Some(doc) = self.doc_of(id, cx) else { return };
+        let subs = self.sub_page_titles(id);
+        let path = save_path(&format!("{}.html", file_name(&doc)), cx);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = path.await else { return };
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("doc").to_string();
-            let assets = format!("{stem}.assets");
-            let out = crate::markdown::export(&doc, &crate::markdown::Options { sub_pages: &subs, assets: all.then_some(assets.as_str()) });
-            let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-            let mut missing = 0;
-            let written = std::fs::write(&path, &out.text).and_then(|_| {
-                for (src, rel) in &out.files {
-                    let to = dir.join(rel);
-                    if let Some(p) = to.parent() {
-                        std::fs::create_dir_all(p)?;
-                    }
-                    // A missing image only loses itself, but is reported.
-                    if std::fs::copy(src, &to).is_err() {
-                        missing += 1;
-                    }
+            let html = crate::html::to_html(&doc, &crate::html::Options { sub_pages: &subs });
+            let res = std::fs::write(&path, html);
+            let _ = this.update(cx, |w, cx| match res {
+                Ok(()) => {
+                    w.toast = None;
+                    cx.notify();
                 }
-                Ok(())
+                Err(_) => w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx),
             });
-            if written.is_err() {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx));
-            } else if missing > 0 {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_format!("已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} images or attachments could not be copied"), cx));
-            }
         })
         .detach();
     }
 
-    /// 下载为 → PDF: the page laid out on A4 by WebKit, saved where the user picks.
+    /// 导出为 → PDF: the page laid out on A4 by WebKit, saved where the user picks.
     pub fn export_pdf(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
         if !printing::SUPPORTED {
@@ -309,86 +260,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 导出 Markdown 设置 as a modal: white, radius 16, a 15pt semibold
-    /// title over a hairline, 13pt options, the buttons on the right.
-    pub(crate) fn render_export_md(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let all = self.export_md.as_ref()?.all;
-        let option = |id: &'static str, on: bool, label: &'static str, value: bool| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .cursor_pointer()
-                .child(radio(on))
-                .child(div().ml(px(8.)).child(label))
-                .on_click(cx.listener(move |w, _, _, cx| {
-                    if let Some(e) = w.export_md.as_mut() {
-                        e.all = value;
-                        cx.notify();
-                    }
-                }))
-        };
-        let dialog = dialog("export-md")
-            .relative()
-            .w(px(720.))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .pt(px(24.))
-                    .pb(px(24.))
-                    .pl(px(24.))
-                    .pr(px(56.))
-                    .border_b_1()
-                    .border_color(Theme::line_divider())
-                    .text_size(px(15.))
-                    .line_height(px(24.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(crate::settings::text("导出 Markdown 设置")),
-            )
-            .child(close_button("export-md-close").absolute().top(px(27.)).right(px(25.)).on_click(cx.listener(|w, _, _, cx| {
-                w.export_md = None;
-                cx.notify();
-            })))
-            .child(
-                div().pt(px(24.)).px(px(24.)).pb(px(16.)).mb(px(24.)).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .text_size(px(13.))
-                        .line_height(px(20.))
-                        .child(div().mr(px(40.)).text_color(Theme::text_caption()).child(crate::settings::text("内容范围")))
-                        .child(
-                            div()
-                                .flex()
-                                .gap(px(24.))
-                                .child(option("export-md-text", !all, crate::settings::text("仅文本（不含图片和附件）"), false))
-                                .child(option("export-md-all", all, crate::settings::text("所有内容"), true)),
-                        ),
-                ),
-            )
-            .child(
-                div()
-                    .px(px(24.))
-                    .pb(px(24.))
-                    .flex()
-                    .justify_end()
-                    .gap(px(12.))
-                    .child(secondary_button("export-md-cancel", crate::settings::text("取消")).min_w(px(80.)).on_click(cx.listener(|w, _, _, cx| {
-                        w.export_md = None;
-                        cx.notify();
-                    })))
-                    .child(primary_button("export-md-ok", crate::settings::text("导出")).min_w(px(80.)).on_click(cx.listener(|w, _, window, cx| w.export_markdown(window, cx)))),
-            );
-        Some(mask(
-            "export-md-mask",
-            dialog,
-            |w, cx| {
-                w.export_md = None;
-                cx.notify();
-            },
-            cx,
-        ))
-    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! On-disk library: a folder of Markdown notes, plus a small JSON index
-//! (pinned flag, timestamps) under `.hush/`.
+//! (pinned flag, timestamps) in the app's data directory — never in the
+//! note folder.
 
 use crate::model::Document;
 use anyhow::Result;
@@ -137,6 +138,10 @@ pub struct Settings {
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
+    /// 图片存放位置 in 设置 → 文档库: empty means `assets/` beside the notes.
+    /// Any other value is the absolute folder pasted images go into.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub assets_dir: String,
 }
 
 #[derive(Clone, Debug)]
@@ -157,9 +162,9 @@ pub struct Entry {
 /// The vault-backed store: a folder of Markdown files (see `vault.rs`).
 ///
 /// `Entry` keeps the shape the UI has always used; behind it, a note's
-/// settings (page width, reading mode, pin) live in the vault's
-/// `.hush/settings.json` rather than in a separate index, because a Markdown
-/// file has nowhere of its own to keep them.
+/// settings (page width, reading mode, pin) live in the app's data
+/// directory, keyed by the vault's path, because a Markdown file has nowhere
+/// of its own to keep them and the note folder stays the user's.
 pub struct Store {
     vault: crate::vault::Vault,
     /// Lowercased file text, for search. Filled on first use and refreshed
@@ -173,7 +178,8 @@ pub struct Store {
     settings: crate::vault::Settings,
 }
 
-/// Version of the vault's own metadata layout, kept in `.hush/format.json`.
+/// Version of the vault's own metadata layout, kept in `format.json` in the
+/// vault's data folder.
 pub const FORMAT: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -189,39 +195,96 @@ struct NotesFile {
     notes: HashMap<String, Meta>,
 }
 
+/// The folder picked in 设置 → 文档库 for pasted images (`None`: beside the
+/// notes). Read from the settings file directly: image storage decides its
+/// destination before a `Store` is at hand.
+pub fn assets_setting() -> Option<String> {
+    let meta = crate::vault::Vault::meta_root(&Store::root_dir());
+    let s: Settings = std::fs::read(meta.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
+    (!s.assets_dir.is_empty()).then_some(s.assets_dir)
+}
+
+/// A folder opened as the library for this process, when it is not the
+/// default one (`hush_md notes/a.md` opens `notes/` as the vault: the file
+/// and its images resolve beside it).
+static ROOT_OVERRIDE: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Point the library at `root` for the rest of the process. A single-file
+/// window does this so the note's own folder is the vault.
+pub fn set_root(root: PathBuf) {
+    *ROOT_OVERRIDE.write().unwrap_or_else(|e| e.into_inner()) = Some(root);
+}
+
 impl Store {
-    /// `HUSH_MD_HOME`, else `Hush.md` in the user's Documents.
+    /// `HUSH_MD_HOME`, else `Hush.md` in the user's Documents; or whatever
+    /// [`set_root`] picked for this process.
     pub fn root_dir() -> PathBuf {
-        crate::vault::Vault::default_root()
+        ROOT_OVERRIDE.read().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(crate::vault::Vault::default_root)
     }
 
-    /// Where copied images and attachments live: `.hush/assets` inside the
-    /// vault, so the user's own folders keep only their files. Absolute
-    /// paths written by older versions stay valid, and so does a relative
-    /// `assets/…` source that was written before the move.
+    /// Where copied images and attachments live, relative to the note:
+    /// `assets/` beside the note (what Typora does), so the folder can be
+    /// moved or synced as a whole. The setting picks a fixed folder instead;
+    /// see [`Self::ensure_assets_dir`].
+    pub const ASSETS_DIR: &str = "assets";
+
+    /// The folder pasted images go into. `assets/` beside the notes by
+    /// default (`None`), or the folder picked in 设置 → 文档库.
     pub fn assets_dir() -> PathBuf {
-        Self::root_dir().join(".hush/assets")
+        match assets_setting() {
+            Some(dir) => PathBuf::from(dir),
+            None => Self::root_dir().join(Self::ASSETS_DIR),
+        }
     }
-
     /// [`Self::assets_dir`], created first: a first paste into a fresh vault
-    /// has no `.hush/assets/` yet.
+    /// has no `assets/` yet.
     pub fn ensure_assets_dir() -> PathBuf {
         let dir = Self::assets_dir();
         let _ = std::fs::create_dir_all(&dir);
         dir
     }
 
-    /// Where a pasted image was copied before it moved under `.hush/`.
+    /// Where a pasted image was copied before the move out of `.hush/`.
     pub fn legacy_assets_dir() -> PathBuf {
-        Self::root_dir().join("assets")
+        crate::vault::Vault::meta_root(&Self::root_dir()).join("assets")
+    }
+
+    /// Derived files that can be thrown away and rebuilt: thumbnails of
+    /// attachments, downloaded copies of remote images. They live in the
+    /// app's data directory, never in the note folder.
+    pub fn cache_dir() -> PathBuf {
+        crate::vault::Vault::data_root().join("cache")
+    }
+
+    /// [`Self::cache_dir`], created first.
+    pub fn ensure_cache_dir() -> PathBuf {
+        let dir = Self::cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        dir
     }
 
     pub fn open() -> Result<Self> {
-        Self::open_at(Self::root_dir())
+        Self::open_seeded(Self::root_dir(), true)
+    }
+
+    /// Open the default vault, optionally writing a welcome note into a folder
+    /// that has none (`false` for a window opened on a single file).
+    pub fn open_seeded(root: PathBuf, seed: bool) -> Result<Self> {
+        let meta = crate::vault::Vault::meta_root(&root);
+        Self::open_at_meta_seeded(root, meta, seed)
     }
 
     pub fn open_at(root: PathBuf) -> Result<Self> {
-        let vault = crate::vault::Vault::open(root)?;
+        Self::open_at_meta(root.clone(), crate::vault::Vault::meta_root(&root))
+    }
+
+    /// Open, with the metadata folder chosen by the caller (tests).
+    pub fn open_at_meta(root: PathBuf, meta: PathBuf) -> Result<Self> {
+        Self::open_at_meta_seeded(root, meta, true)
+    }
+
+    pub fn open_at_meta_seeded(root: PathBuf, meta: PathBuf, seed: bool) -> Result<Self> {
+        let vault = crate::vault::Vault::open_at(root, meta)?;
         // A folder with no notes gets one to start from. An existing vault is
         // never touched.
         let empty = std::fs::read_dir(vault.root()).map(|rd| {
@@ -230,12 +293,12 @@ impl Store {
                 e.path().is_dir() || n.starts_with('.') || !crate::vault::is_note_path(&e.path())
             })
         }).unwrap_or(false);
-        if empty {
+        if seed && empty {
             let name = crate::welcome::file_name(false);
             let _ = vault.write_text(name, crate::welcome::TEXT);
         }
         let mut warnings = vec![];
-        let meta_dir = vault.root().join(".hush");
+        let meta_dir = vault.meta_dir().to_path_buf();
         let _ = std::fs::create_dir_all(&meta_dir);
         let marker = meta_dir.join("format.json");
         match std::fs::read(&marker).ok().and_then(|b| serde_json::from_slice::<FormatMarker>(&b).ok()) {
@@ -256,7 +319,7 @@ impl Store {
 
     fn save_notes(&self) -> Result<()> {
         let f = NotesFile { format: FORMAT, notes: self.notes.clone() };
-        write_atomic(&self.vault.root().join(".hush/notes.json"), &serde_json::to_vec_pretty(&f)?)
+        write_atomic(&self.vault.meta_dir().join("notes.json"), &serde_json::to_vec_pretty(&f)?)
     }
 
     /// Every note in the vault, newest first? No: the sidebar sorts, so this
@@ -582,7 +645,19 @@ pub fn image_path(src: &str) -> Option<PathBuf> {
 }
 
 /// Like [`image_path`], resolving `src` relative to the note at `note`.
+///
+/// Pasted images are written as `assets/<id>.png`, relative to the note's
+/// own folder — which for a note in `notes/` is `notes/assets/`. Older
+/// builds wrote the same text from the vault root, so a source that is not
+/// beside the note is tried from there as well, and finally in the copy an
+/// older version kept under `.hush/assets/`.
 pub fn image_path_in(note: Option<&str>, src: &str) -> Option<PathBuf> {
+    image_path_in_root(&Store::root_dir(), note, src)
+}
+
+/// [`image_path_in`] with the vault root given, for callers that hold one
+/// (and for tests, which cannot set the process-wide default).
+pub fn image_path_in_root(root: &Path, note: Option<&str>, src: &str) -> Option<PathBuf> {
     if src.is_empty() || src.contains("://") {
         return None;
     }
@@ -593,19 +668,17 @@ pub fn image_path_in(note: Option<&str>, src: &str) -> Option<PathBuf> {
     if let Some(note) = note
         && let Some(dir) = note.rsplit_once('/').map(|(d, _)| d)
     {
-        let beside = Store::root_dir().join(dir).join(p);
+        let beside = root.join(dir).join(p);
         if beside.exists() {
             return Some(beside);
         }
     }
-    let full = Store::root_dir().join(p);
+    let full = root.join(p);
     if full.exists() {
         return Some(full);
     }
-    // Images the app copied used to live in `assets/` at the vault root;
-    // a note written then still says `assets/<id>.png`. Look there too.
     src.strip_prefix("assets/")
-        .map(|rest| Store::legacy_assets_dir().join(rest))
+        .map(|rest| crate::vault::Vault::meta_root(root).join("assets").join(rest))
         .filter(|p| p.exists())
 }
 
@@ -621,14 +694,19 @@ mod tests {
             std::fs::create_dir_all(&d).unwrap();
             Lib(d)
         }
+        /// Metadata in a folder of its own: the note folder stays the user's.
+        fn meta(&self) -> PathBuf {
+            self.0.with_extension("meta")
+        }
         fn open(&self) -> Store {
-            Store::open_at(self.0.clone()).unwrap()
+            Store::open_at_meta(self.0.clone(), self.meta()).unwrap()
         }
     }
 
     impl Drop for Lib {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_dir_all(self.meta());
         }
     }
 
@@ -647,7 +725,7 @@ mod tests {
         // (Permanent: the system trash is the user's, not the test's.)
         s.delete_permanently(&list[0].id).unwrap();
         assert!(!lib.0.join(&list[0].id).exists());
-        let mut again = Store::open_at(lib.0.clone()).unwrap();
+        let mut again = Store::open_at_meta(lib.0.clone(), lib.meta()).unwrap();
         assert_eq!(again.list().len(), 1, "a vault that had notes keeps its state");
     }
 
@@ -750,5 +828,44 @@ mod tests {
         std::fs::create_dir_all(lib.0.join(".a.md.tmp")).unwrap();
         assert!(s.save("a.md", &doc("New")).is_err());
         assert_eq!(std::fs::read_to_string(lib.0.join("a.md")).unwrap(), "# Old\n");
+    }
+
+    #[test]
+    fn settings_never_land_in_the_note_folder() {
+        let lib = Lib::new("clean");
+        std::fs::write(lib.0.join("a.md"), "# A\n").unwrap();
+        let mut s = lib.open();
+        s.set_pinned("a.md", true).unwrap();
+        s.save_settings(&Settings { sidebar_width: Some(280.), ..Default::default() }).unwrap();
+        let left: Vec<_> = std::fs::read_dir(&lib.0).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, vec!["a.md".to_string()], "the note folder holds only notes");
+        assert!(lib.meta().join("notes.json").is_file());
+        assert!(lib.meta().join("settings.json").is_file());
+    }
+
+    #[test]
+    fn an_old_dot_hush_folder_is_moved_out_and_removed() {
+        let lib = Lib::new("migrate");
+        std::fs::write(lib.0.join("a.md"), "# A\n").unwrap();
+        std::fs::create_dir_all(lib.0.join(".hush/themes")).unwrap();
+        std::fs::write(lib.0.join(".hush/settings.json"), r#"{"sidebar_width": 311.0}"#).unwrap();
+        std::fs::write(lib.0.join(".hush/themes/mine.css"), "body{}").unwrap();
+        let s = lib.open();
+        assert_eq!(s.settings().sidebar_width, Some(311.));
+        assert!(!lib.0.join(".hush").exists(), "the old folder is gone");
+        assert_eq!(std::fs::read_to_string(lib.meta().join("themes/mine.css")).unwrap(), "body{}");
+    }
+
+    #[test]
+    fn images_resolve_beside_the_note_and_from_older_locations() {
+        let lib = Lib::new("images");
+        std::fs::create_dir_all(lib.0.join("notes/assets")).unwrap();
+        std::fs::write(lib.0.join("notes/assets/pic.png"), b"x").unwrap();
+        // Written by this version: relative to the note's own folder.
+        assert!(image_path_in_root(&lib.0, Some("notes/a.md"), "assets/pic.png").is_some());
+        // Written from the vault root by an older version.
+        std::fs::create_dir_all(lib.0.join("assets")).unwrap();
+        std::fs::write(lib.0.join("assets/old.png"), b"x").unwrap();
+        assert!(image_path_in_root(&lib.0, None, "assets/old.png").is_some());
     }
 }

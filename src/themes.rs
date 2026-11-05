@@ -312,7 +312,7 @@ pub fn generation() -> u64 { GENERATION.load(Ordering::Relaxed) }
 pub fn themes() -> std::sync::RwLockReadGuard<'static, Vec<Theme>> { THEMES.read().unwrap() }
 /// Files that could not be read at all, from the last load.
 pub fn errors() -> Vec<String> { ERRORS.read().unwrap().clone() }
-pub fn dir() -> PathBuf { crate::store::Store::root_dir().join(".hush/themes") }
+pub fn dir() -> PathBuf { crate::vault::Vault::meta_root(&crate::store::Store::root_dir()).join("themes") }
 
 // ---- CSS
 

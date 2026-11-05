@@ -40,6 +40,15 @@ SignedUninstaller=yes
 SignedUninstallerDir={#AppSource}
 #endif
 
+[Registry]
+; 用 hush.md 打开 .md / .markdown (double-click, "Open with").
+Root: HKA; Subkey: "Software\Classes\hush.md"; Flags: uninsdeletekey; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\hush.md"; ValueType: string; ValueName: ""; ValueData: "Markdown document"; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\hush.md\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\hush_md.exe,0"; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\hush.md\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "\"{app}\hush_md.exe\" \"%1\""; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Tasks: associate
+
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
@@ -50,6 +59,7 @@ FinishedLabel=hush.md is ready. A quiet place for your notes.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
+Name: "associate"; Description: "Open .md and .markdown files with hush.md"; Flags: checkedonce
 
 [Files]
 Source: "{#AppSource}\hush_md.exe"; DestDir: "{app}"; Flags: ignoreversion

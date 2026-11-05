@@ -187,7 +187,7 @@ impl ImageUi {
             toast: None,
             toast_task: None,
             remote: RefCell::default(),
-            remote_dir: Store::ensure_assets_dir().join("remote"),
+            remote_dir: Store::ensure_cache_dir().join("remote"),
             generation: 0,
             retried: HashMap::new(),
             file_drop: None,
@@ -1556,7 +1556,7 @@ impl Editor {
             })
             .child(sep())
             .child(tool("lb-rotate", "rotate-ccw-square", crate::settings::text("旋转"), true, |e, _, cx| e.lb_rotate(cx)))
-            .child(tool("lb-download", "download", crate::settings::text("下载"), true, |e, _, cx| e.lb_download(cx)));
+            .child(tool("lb-download", "download", crate::settings::text("保存副本"), true, |e, _, cx| e.lb_download(cx)));
         let pill = div().absolute().bottom(px(20.)).left_0().w(px(vw)).flex().justify_center().opacity(chrome).child(pill);
 
         let layer = div()
@@ -1714,8 +1714,9 @@ impl Editor {
         });
         let mut blocks = vec![];
         let mut err = None;
+        let dir = self.note_dir();
         for p in pics {
-            match image_block_from_file(p) {
+            match image_block_from_file(p, &dir) {
                 Ok(b) => blocks.push(b),
                 Err(e) => err = Some(e),
             }
@@ -1817,11 +1818,16 @@ fn decode_rotated(path: &Path, crop: [f32; 4], rot: u8) -> Option<Arc<RenderImag
 
 /// A new image block for pasted or picked bytes, stored in the assets
 /// folder (format, size and pixel checks on upload).
-pub(super) fn image_block_from(bytes: &[u8], ext: &str) -> Result<Block, &'static str> {
-    let path = store_image(bytes, ext)?;
-    // Markdown carries a vault-relative path, so the note and the vault can
-    // move together without breaking the link.
-    let src = path.strip_prefix(Store::root_dir()).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| path.to_string_lossy().to_string());
+///
+/// `note_dir` is the folder of the note being edited (vault-relative, `""`
+/// at the root): the image goes into `assets/` beside it and the Markdown
+/// says `assets/<id>.png`, so the note and its images move together. A
+/// folder picked in 设置 → 文档库 is written as an absolute path instead.
+pub(super) fn image_block_from(bytes: &[u8], ext: &str, note_dir: &str) -> Result<Block, &'static str> {
+    let (dir, relative) = assets_target(note_dir);
+    let path = store_image(bytes, ext, &dir)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let src = if relative { format!("{}/{name}", Store::ASSETS_DIR) } else { path.to_string_lossy().into_owned() };
     let mut b = Block::new(
         BlockKind::Image { src_kind: "src".into(), src, width: None, height: None, caption: None, crop: None },
         RichText::default(),
@@ -1830,8 +1836,24 @@ pub(super) fn image_block_from(bytes: &[u8], ext: &str) -> Result<Block, &'stati
     Ok(b)
 }
 
-/// Checks picked or pasted image bytes and copies them into the assets folder.
-pub(super) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static str> {
+/// Where a note's pasted images go, and whether the Markdown should name
+/// that folder relative to the note (`assets/…`) rather than absolutely.
+pub(super) fn assets_target(note_dir: &str) -> (PathBuf, bool) {
+    match crate::store::assets_setting() {
+        Some(custom) => {
+            let _ = std::fs::create_dir_all(&custom);
+            (PathBuf::from(custom), false)
+        }
+        None => {
+            let dir = Store::root_dir().join(note_dir).join(Store::ASSETS_DIR);
+            let _ = std::fs::create_dir_all(&dir);
+            (dir, true)
+        }
+    }
+}
+
+/// Checks picked or pasted image bytes and copies them into `dir`.
+pub(super) fn store_image(bytes: &[u8], ext: &str, dir: &Path) -> Result<PathBuf, &'static str> {
     let ext = ext.to_ascii_lowercase();
     if !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -1844,12 +1866,12 @@ pub(super) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static s
         .ok()
         .and_then(|r| r.into_dimensions().ok())
         .ok_or(BAD_DIMS)?;
-    let path = Store::ensure_assets_dir().join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::write(&path, bytes).map_err(|_| BAD_DIMS)?;
     Ok(path)
 }
 
-fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
+fn image_block_from_file(p: &Path, note_dir: &str) -> Result<Block, &'static str> {
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !p.is_file() || !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -1858,10 +1880,10 @@ fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
         return Err(TOO_BIG);
     }
     let bytes = std::fs::read(p).map_err(|_| BAD_DIMS)?;
-    image_block_from(&bytes, &ext)
+    image_block_from(&bytes, &ext, note_dir)
 }
 
-/// File name of a remote image's download in `.hush/assets/remote`.
+/// File name of a remote image's download in the assets folder's `remote/`.
 fn remote_name(url: &str) -> String {
     let mut h = rustc_hash::FxHasher::default();
     url.hash(&mut h);
@@ -1870,18 +1892,19 @@ fn remote_name(url: &str) -> String {
 
 /// The downloaded copy of a remote image, if it has been fetched.
 pub fn cached_remote(url: &str) -> Option<PathBuf> {
-    Some(Store::assets_dir().join("remote").join(remote_name(url))).filter(|p| p.is_file())
+    Some(Store::cache_dir().join("remote").join(remote_name(url))).filter(|p| p.is_file())
 }
 
 /// Pasted HTML images: `data:` URIs and local files become owned assets;
-/// unreadable ones are dropped. Remote images stay remote.
-pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
+/// unreadable ones are dropped. Remote images stay remote. `note_dir` is the
+/// folder the paste lands in (see [`assets_target`]).
+pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>, note_dir: &str) {
     use base64::Engine;
     blocks.retain_mut(|b| {
-        localize_pasted_images(&mut b.children);
+        localize_pasted_images(&mut b.children, note_dir);
         if let BlockKind::Table(t) = &mut b.kind {
             for cell in t.rows.iter_mut().flatten() {
-                localize_pasted_images(&mut cell.blocks);
+                localize_pasted_images(&mut cell.blocks, note_dir);
                 if cell.blocks.is_empty() && !cell.is_covered() {
                     cell.blocks.push(Block::text(""));
                 }
@@ -1892,9 +1915,9 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
             let Some((head, payload)) = data.split_once(',') else { return false };
             let ext = head.split(';').next().unwrap_or_default().replace("jpeg", "jpg");
             let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(payload.trim()) else { return false };
-            image_block_from(&bytes, &ext)
+            image_block_from(&bytes, &ext, note_dir)
         } else if src.starts_with('/') {
-            image_block_from_file(Path::new(src.as_str()))
+            image_block_from_file(Path::new(src.as_str()), note_dir)
         } else {
             return true;
         };

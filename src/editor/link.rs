@@ -78,14 +78,21 @@ pub fn contains_url(s: &str) -> bool {
     is_email(s) || CONTAINS_RE.is_match(s)
 }
 
-/// A relative link (`other.md`, `img/a.png`) resolved inside the vault.
-fn local_link(url: &str) -> Option<std::path::PathBuf> {
+/// A relative link (`other.md`, `img/a.png`): tried beside `note` first, the
+/// way Markdown resolves it, then from the vault root.
+fn local_link(url: &str, note: Option<&str>) -> Option<std::path::PathBuf> {
     if url.contains("://") || url.starts_with("mailto:") || url.starts_with('#') || url.starts_with('/') {
         return None;
     }
     let url = url.split('#').next().unwrap_or("").trim();
     if url.is_empty() {
         return None;
+    }
+    if let Some(dir) = note.and_then(|n| n.rsplit_once('/').map(|(d, _)| d)) {
+        let beside = hush_core::store::Store::root_dir().join(dir).join(url);
+        if beside.exists() {
+            return Some(beside);
+        }
     }
     let p = hush_core::store::Store::root_dir().join(url);
     p.exists().then_some(p)
@@ -564,7 +571,7 @@ impl Editor {
         {
             // A link to another note or a local file opens in the app or the
             // system, not in a browser.
-            if let Some(path) = local_link(&url) {
+            if let Some(path) = local_link(&url, self.note_path.as_deref()) {
                 match path.extension().and_then(|e| e.to_str()) {
                     Some("md" | "markdown") => {
                         let rel = path.strip_prefix(hush_core::store::Store::root_dir()).ok().map(|p| p.to_string_lossy().replace('\\', "/"));

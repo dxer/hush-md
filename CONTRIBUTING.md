@@ -35,7 +35,7 @@ FDL_FUZZ_SEEDS=2000 cargo test --release random_edits   # 更多随机编辑，�
 | 文档 | 内容 |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、编辑流程、不变量、撤销、渲染、模块地图 |
-| [docs/FORMAT.md](docs/FORMAT.md) | 文件夹布局、`.hush/`、支持的 Markdown 写法和无损保存规则 |
+| [docs/FORMAT.md](docs/FORMAT.md) | 文件夹布局、应用数据目录、支持的 Markdown 写法和无损保存规则 |
 | [docs/THEMES.md](docs/THEMES.md) | 文档主题的 CSS 写法：选择器、属性、命名颜色 |
 | [AGENTS.md](AGENTS.md) | 代码风格、提交前检查、测试约定 |
 

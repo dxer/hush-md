@@ -1,5 +1,5 @@
 //! The header "…" menu: page width, find & replace, move, pin, star,
-//! duplicate, 下载为 PDF / Markdown, 打印, document info and delete.
+//! duplicate, 导出为 PDF / HTML, 打印, document info and delete.
 
 use crate::app::Workspace;
 use crate::settings::display_title;
@@ -11,7 +11,7 @@ use gpui::{prelude::FluentBuilder, *};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DocSub {
     Width,
-    Download,
+    Export,
     /// 更多: 显示引用列表.
     More,
 }
@@ -38,7 +38,7 @@ fn menu_item(id: &'static str, ic: &'static str, label: impl Into<SharedString>,
         .when(sub, |d| d.child(if open { icon("chevron-right", 10., gpui::white()) } else { crate::ui::menu_glyph("chevron-right", 10., g) }))
 }
 
-/// 下载为's text-only items.
+/// 导出为's items.
 pub(crate) fn sub_item(id: &'static str, label: &'static str) -> Stateful<Div> {
     crate::ui::menu_row(id, SharedString::from(id)).mx(px(0.)).child(crate::ui::menu_label(label, SharedString::from(id), gpui::white()))
 }
@@ -196,8 +196,8 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _, window, cx| w.duplicate_doc(&dup_id, window, cx))),
             )
             .child(
-                menu_item("dm-download", "export", crate::settings::text("下载为"), true, sub == Some(DocSub::Download))
-                    .on_hover(hover_sub(Some(DocSub::Download))),
+                menu_item("dm-download", "export", crate::settings::text("导出为"), true, sub == Some(DocSub::Export))
+                    .on_hover(hover_sub(Some(DocSub::Export))),
             )
             .child(divider())
             .when(crate::printing::SUPPORTED, |d| d.child(
@@ -248,11 +248,11 @@ impl Workspace {
         };
         let sub_el = match sub {
             Some(DocSub::Width) => Some((item_top(0, 0) - 1. - PAD, self.width_panel(width, cx).child(recorder()).into_any_element())),
-            // Level the submenu's first item with 下载为.
-            Some(DocSub::Download) => Some((
+            // Level the submenu's first item with 导出为.
+            Some(DocSub::Export) => Some((
                 item_top(6, 3) - 1. - PAD,
                 {
-                    let pdf = id.clone();
+                    let (pdf, html) = (id.clone(), id.clone());
                     popover()
                         .id("dm-download-menu")
                         .occlude()
@@ -261,7 +261,7 @@ impl Workspace {
                         .py(px(PAD))
                         .child(recorder())
                         .when(crate::printing::SUPPORTED, |d| d.child(sub_item("dm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))
-                        .child(sub_item("dm-md", "Markdown").on_click(cx.listener(move |w, _, _, cx| w.open_export_md(&id, cx))))
+                        .child(sub_item("dm-html", "HTML").on_click(cx.listener(move |w, _, window, cx| w.export_html(&html, window, cx))))
                         .into_any_element()
                 },
             )),
