@@ -40,6 +40,22 @@ jobs:
       - name: Tests, bundled guides and clippy
         run: scripts/check.sh
 
+      # No signing certificate in CI, so the .dmg is unsigned and un-notarized:
+      # good enough to try a build, not to hand to users. Releasing properly
+      # still means running scripts/package.sh on a machine with the Developer
+      # ID certificate.
+      - name: Package (unsigned)
+        run: PACKAGE_UNSIGNED=1 scripts/package.sh
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hush-md-macos-${{ github.sha }}
+          path: |
+            dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
   windows-build:
     name: Windows x64 build
     runs-on: windows-2022
@@ -62,3 +78,30 @@ jobs:
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
           & cargo build --release --locked
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+
+      - name: Package installer (unsigned)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          Import-Module "$vs/Common7/Tools/Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          # The runner image ships Inno Setup; the version in the folder name moves.
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup*/ISCC.exe" | Select-Object -Last 1
+          if (!$iscc) { throw 'ISCC.exe was not found; Inno Setup is missing from the runner image' }
+          # -File instead of & ./script.ps1: the runner's execution policy is
+          # not ours to change, and the developer environment set above is
+          # inherited by the child process.
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1 -Iscc "$($iscc.FullName)"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hush-md-windows-${{ github.sha }}
+          path: |
+            dist/windows/unsigned/*.exe
+            dist/windows/unsigned/*.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -44,3 +44,18 @@ FDL_FUZZ_SEEDS=2000 cargo test --release random_edits   # 更多随机编辑，�
 发布前需完成 `scripts/check.sh`，并确认对应提交的 CI 通过。
 
 发布二进制在 `[profile.release]` 里 `strip = "symbols"`：符号表原本占 12 MB，去掉后安装包小很多。不要把 `panic` 改成 `abort`——`src/editor/math.rs` 靠 `catch_unwind` 从 katex 的 panic 里恢复。`vendor/gpui/Cargo.toml` 的 `image` 依赖也关掉了默认特性（见 `vendor/PATCHES.md` 第 15 条），剩下的几种格式够用。现有的 `scripts/package.sh` / `scripts/release.sh` 和 `packaging/` 是从 quiet.md 带过来的 macOS / Windows 打包脚本；应用名、bundle id 和安装包文件名已换成 hush.md（`com.dxer.hushmd`、`packaging/windows/hush-md.iss`），但证书、公证和下载地址仍指向 quiet.md，正式发布前需要替换。
+
+**CI 的构建产物。** 每次 push 到 `main`（以及手动 `workflow_dispatch`），两个 job 都会把安装包传到这次运行的 Artifacts 里，保留 30 天：
+
+| Artifact | 内容 |
+|---|---|
+| `hush-md-macos-<sha>` | `hush.md-<version>.dmg` |
+| `hush-md-windows-<sha>` | `hush-md-<version>-windows-x64-setup.exe` 和 `.sha256` |
+
+CI 没有签名证书，所以这些包是**未签名、未公证**的，只用来试装和验证构建：macOS 上要右键「打开」，Windows 上会有 SmartScreen 提示。可以直接复用同一个脚本在本地签：
+
+```sh
+PACKAGE_UNSIGNED=1 scripts/package.sh      # 不签名，和 CI 一样
+scripts/package.sh                          # 自动找钥匙串里的 Developer ID 证书并公证
+scripts/package-windows.ps1                 # 未签名安装器；加 -CertificateThumbprint 则签名
+```

@@ -13,17 +13,23 @@
 #   CODESIGN_ID    证书名，默认自动取钥匙串里的第一个 "Developer ID Application"
 #   NOTARY_PROFILE notarytool 的 profile 名，默认 hush-md
 #   BUNDLE_ID      bundle identifier，默认 com.dxer.hushmd（发布前改成你自己的反向域名）
+#   PACKAGE_UNSIGNED=1  没有证书时也继续：产出未签名、未公证的 dmg（CI 用）。
+#                  用户第一次打开要右键「打开」，正式发布不要这样发。
 set -e
 cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
 bundle_id=${BUNDLE_ID:-com.dxer.hushmd}
 profile=${NOTARY_PROFILE:-hush-md}
-sign_id=${CODESIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)}
-[ -n "$sign_id" ] || {
-  echo "package.sh: 钥匙串里没有 Developer ID Application 证书。" >&2
-  echo "  Apple Developer Program 会员可以在 developer.apple.com 申请，导入后用 security find-identity 确认。" >&2
-  exit 1
-}
+sign_id=${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1 || true)}
+if [ -z "$sign_id" ]; then
+  [ -n "${PACKAGE_UNSIGNED:-}" ] || {
+    echo "package.sh: 钥匙串里没有 Developer ID Application 证书。" >&2
+    echo "  Apple Developer Program 会员可以在 developer.apple.com 申请，导入后用 security find-identity 确认。" >&2
+    echo "  只是要一个能跑的构建（CI）：PACKAGE_UNSIGNED=1 scripts/package.sh" >&2
+    exit 1
+  }
+  echo "== 没有签名证书，产出未签名构建（PACKAGE_UNSIGNED=1）"
+fi
 
 out=dist
 app="$out/hush.md.app"
@@ -62,9 +68,11 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-echo "== 签名（hardened runtime + 时间戳）"
-codesign --force --options runtime --timestamp --sign "$sign_id" "$app"
-codesign --verify --strict --verbose=2 "$app"
+if [ -n "$sign_id" ]; then
+  echo "== 签名（hardened runtime + 时间戳）"
+  codesign --force --options runtime --timestamp --sign "$sign_id" "$app"
+  codesign --verify --strict --verbose=2 "$app"
+fi
 
 echo "== 打包 $dmg"
 rm -rf "$out/dmg-root"
@@ -73,15 +81,20 @@ cp -R "$app" "$out/dmg-root/"
 ln -s /Applications "$out/dmg-root/Applications"
 hdiutil create -quiet -volname "hush.md" -srcfolder "$out/dmg-root" -ov -format UDZO "$dmg"
 rm -rf "$out/dmg-root"
-codesign --force --timestamp --sign "$sign_id" "$dmg"
 
-echo "== 公证（需要网络，通常几分钟）"
-xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
-xcrun stapler staple "$dmg"
-xcrun stapler validate "$dmg"
+if [ -n "$sign_id" ]; then
+  codesign --force --timestamp --sign "$sign_id" "$dmg"
 
-echo "== 验收"
-spctl -a -vvv -t install "$dmg" || true
-codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags"
+  echo "== 公证（需要网络，通常几分钟）"
+  xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
+  xcrun stapler staple "$dmg"
+  xcrun stapler validate "$dmg"
+
+  echo "== 验收"
+  spctl -a -vvv -t install "$dmg" || true
+  codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags"
+else
+  echo "== 跳过签名与公证（未签名构建，只用于测试）"
+fi
 echo
 echo "好了：$dmg（$(du -h "$dmg" | cut -f1)）"
