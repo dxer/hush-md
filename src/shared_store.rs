@@ -13,6 +13,8 @@ impl SharedStore {
     pub fn open_single_file() -> Result<Self> { Ok(Self(Rc::new(RefCell::new(Store::open_seeded(Store::root_dir(), false)?)))) }
     pub fn take_warnings(&self) -> Vec<String> { std::mem::take(&mut self.0.borrow_mut().warnings) }
     pub fn list(&mut self) -> Vec<Entry> { self.0.borrow_mut().list() }
+    /// One note, without scanning the whole folder (single-file windows).
+    pub fn entry_at(&mut self, id: &str) -> Option<Entry> { self.0.borrow_mut().entry_at(id) }
     pub fn folders(&self) -> Vec<hush_core::vault::Folder> { self.0.borrow().folders() }
     pub fn resolve(&self, rel: &str) -> Result<std::path::PathBuf> { self.0.borrow().resolve(rel) }
     pub fn move_to_folder(&mut self, id: &str, folder: &str) -> Result<String> { self.0.borrow_mut().move_to_folder(id, folder) }

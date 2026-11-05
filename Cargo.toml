@@ -1,6 +1,6 @@
 [package]
 name = "hush_md"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A fast, quiet Markdown editor and reader, drawn natively with GPUI"
 license = "MIT"

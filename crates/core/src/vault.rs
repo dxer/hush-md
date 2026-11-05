@@ -264,6 +264,23 @@ impl Vault {
         false
     }
 
+    /// One note, by vault-relative path, without scanning the folder.
+    pub fn note_at(&mut self, rel: &str) -> Option<Note> {
+        // Same rule as `resolve`: nothing that climbs out of the vault.
+        if rel.split('/').any(|s| s == ".." || s.is_empty()) || Path::new(rel).is_absolute() {
+            return None;
+        }
+        let path = self.root.join(rel);
+        if !path.is_file() || !is_note_path(&path) {
+            return None;
+        }
+        let stem = stem_of(rel.rsplit('/').next().unwrap_or(rel));
+        let folder = rel.rsplit_once('/').map(|(d, _)| d.to_string());
+        let (created, modified, size) = stat(&path);
+        let title = self.title_of(rel, &path, modified);
+        Some(Note { path: rel.to_string(), name: stem, title, folder, modified, created, size, dirty: false })
+    }
+
     /// Notes directly inside `folder` (`None` = the vault root).
     pub fn notes_in(&self, folder: Option<&str>) -> Vec<PathBuf> {
         let dir = match folder {

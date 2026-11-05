@@ -2,7 +2,7 @@
 # disk, import and export. No GPUI, so it builds and tests on its own.
 [package]
 name = "hush_core"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "The Markdown engine behind hush.md: block model, Markdown parsing and lossless writing, editing core"
 license = "MIT"

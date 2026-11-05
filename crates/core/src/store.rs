@@ -322,6 +322,19 @@ impl Store {
         write_atomic(&self.vault.meta_dir().join("notes.json"), &serde_json::to_vec_pretty(&f)?)
     }
 
+    /// One note by path, read straight from disk. A window opened on a single
+    /// file uses this instead of [`Self::list`]: pointing the app at one `.md`
+    /// in a folder of ten thousand must not scan, stat and read all of them
+    /// before the first frame.
+    pub fn entry_at(&mut self, id: &str) -> Option<Entry> {
+        let note = self.vault.note_at(id)?;
+        let mut e = self.entry(note);
+        if let Ok(text) = self.vault.read_text(id) {
+            e.body = self.search.entry(id.to_string()).or_insert_with(|| text.to_lowercase()).clone();
+        }
+        Some(e)
+    }
+
     /// Every note in the vault, newest first? No: the sidebar sorts, so this
     /// is the folder order from `vault::list`.
     pub fn list(&mut self) -> Vec<Entry> {
@@ -755,6 +768,32 @@ mod tests {
         assert!(list.iter().any(|e| e.id == "long.markdown"));
         assert!(!list.iter().any(|e| e.id == "ignore.txt"));
         assert!(s.load("long.markdown").is_ok());
+    }
+
+    #[test]
+    fn entry_at_reads_one_note_without_scanning_the_folder() {
+        let lib = Lib::new("entry-at");
+        std::fs::write(lib.0.join("keeper.md"), "# Keeper\n\nbody\n").unwrap();
+        for i in 0..50 {
+            std::fs::write(lib.0.join(format!("other-{i}.md")), "# Other\n").unwrap();
+        }
+        std::fs::create_dir(lib.0.join("sub")).unwrap();
+        std::fs::write(lib.0.join("sub/deep.md"), "# Deep\n\nbody\n").unwrap();
+        let mut s = lib.open();
+        // A file window lists only the note it was opened on; the folder's
+        // other notes stay out of `entries` but still resolve.
+        let e = s.entry_at("keeper.md").unwrap();
+        assert_eq!(e.title, "Keeper");
+        assert!(e.body.contains("body"), "search text is filled in");
+        let deep = s.entry_at("sub/deep.md").unwrap();
+        assert_eq!((deep.title.as_str(), deep.meta.created > 0), ("Deep", true));
+        // Not a note, not there: nothing to list.
+        assert!(s.entry_at("ignore.txt").is_none());
+        assert!(s.entry_at("missing.md").is_none());
+        // Paths that try to leave the vault are refused like everywhere else.
+        assert!(s.entry_at("../escape.md").is_none());
+        // The full scan still finds everything when a library window asks.
+        assert_eq!(s.list().len(), 52);
     }
 
     #[test]

@@ -343,8 +343,14 @@ impl Workspace {
             cx.set_global(store.expect("open document library"));
         }
         let mut store = cx.global::<SharedStore>().clone();
-        let entries = store.list();
-        let folders = store.folders();
+        // A file window opens on one note: read that one, not the folder.
+        let entries = if seed {
+            store.list()
+        } else {
+            document.as_deref().and_then(|name| store.entry_at(name)).into_iter().collect()
+        };
+        // No sidebar in a file window, so the folder tree is not worth a walk.
+        let folders = if seed { store.folders() } else { vec![] };
         let search = cx.new(|cx| {
             let mut f = TextField::new("搜索", cx);
             f.placeholder_color = Theme::text_disabled();
@@ -361,9 +367,17 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    this.entries = this.store.list();
-                    this.folders = this.store.folders();
-                    this.sort();
+                    // A file window shows one note: rescanning its whole folder
+                    // on every focus (alt-tab, a click back into the window)
+                    // would stall on a big folder for no visible gain.
+                    if this.single_file {
+                        this.refresh_single_entry();
+                    } else {
+                        this.entries = this.store.list();
+                        this.folders = this.store.folders();
+                        this.sort();
+                        this.sync_sub_pages(cx);
+                    }
                     // The files are the source of truth: if another program
                     // changed the open note, show what is on disk now.
                     this.reload_if_changed_on_disk(window, cx);
@@ -526,6 +540,17 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Re-read the one note a file window shows (its title may have changed
+    /// in another editor), without walking the folder it lives in.
+    fn refresh_single_entry(&mut self) {
+        let Some(id) = self.current.clone() else { return };
+        let Some(fresh) = self.store.entry_at(&id) else { return };
+        match self.entries.iter_mut().find(|e| e.id == id) {
+            Some(e) => { e.title = fresh.title; e.meta = fresh.meta; e.body = fresh.body; }
+            None => self.entries.push(fresh),
+        }
+    }
+
     pub fn open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.try_open(id, window, cx);
     }
@@ -541,10 +566,11 @@ impl Workspace {
         crate::store::set_root(dir);
         cx.set_global(SharedStore::open_single_file().expect("open document"));
         self.store = cx.global::<SharedStore>().clone();
-        self.entries = self.store.list();
-        self.folders = self.store.folders();
-        self.sort();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        // The window shows one file, so only that one is listed.
+        self.entries = self.store.entry_at(&name).into_iter().collect();
+        self.folders.clear();
+        self.sort();
         if self.entries.iter().any(|e| e.id == name) {
             self.current = None;
             self.open(&name, window, cx);
@@ -560,6 +586,14 @@ impl Workspace {
         let root = crate::store::Store::root_dir();
         if let Ok(rel) = path.strip_prefix(&root) {
             let id = rel.to_string_lossy().replace('\\', "/");
+            // In a file window `entries` holds only the note on screen; the
+            // folder's other files are still the same vault, so no new process.
+            if self.single_file && self.store.entry_at(&id).is_some() && !self.entries.iter().any(|e| e.id == id) {
+                self.entries = self.store.entry_at(&id).into_iter().collect();
+                self.current = None;
+                self.open(&id, window, cx);
+                return;
+            }
             if self.entries.iter().any(|e| e.id == id) {
                 self.open(&id, window, cx);
                 return;

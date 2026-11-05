@@ -15,6 +15,7 @@ shadow: it has to read at 16px in a menu bar as well as at 1024px in the
 Dock.
 """
 
+import io
 import os
 import struct
 
@@ -110,14 +111,8 @@ def write_bmp(path, image):
     write one by hand: bottom-up rows, BGRA, all-zero masks meaning "default".
     """
     w, h = image.size
-    rows = []
-    for y in range(h - 1, -1, -1):
-        row = bytearray()
-        for x in range(w):
-            r, g, b, a = image.getpixel((x, y))
-            row += bytes((b, g, r, a))
-        rows.append(bytes(row))
-    pixels = b"".join(rows)
+    rgba = np.asarray(image, np.uint8)[::-1]
+    pixels = rgba[:, :, [2, 1, 0, 3]].tobytes()
     header = struct.pack("<IiiHHIIiiII", 108, w, h, 1, 32, 3, len(pixels), 3780, 3780, 0, 0)
     masks = struct.pack("<IIII", 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000)
     space = bytes(4 * 8)  # colour space type + the 8 endpoints
@@ -128,12 +123,58 @@ def write_bmp(path, image):
         f.write(body)
 
 
+def ico_frame(image, size):
+    """One ICO frame as a 32-bit DIB (BITMAPINFOHEADER + BGRA + AND mask).
+
+    PNG frames are legal in an ICO and Pillow writes only those, but Windows
+    compresses down to 48px by asking the shell: a PNG frame at 16–48 is the
+    one case older shell paths and some overlay/theme caches mishandle, and the
+    symptom is exactly "the old icon is still showing". Small 32-bit DIBs are
+    the format every Windows version reads.
+    """
+    im = image.resize((size, size), Image.LANCZOS)
+    # BGRA, rows bottom-up; numpy because a per-pixel loop over 256² is slow
+    # enough to look like a hang.
+    rgba = np.asarray(im, np.uint8)[::-1]
+    bgra = rgba[:, :, [2, 1, 0, 3]].tobytes()
+    header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, len(bgra), 0, 0, 0, 0)
+    # The AND mask is 1bpp, padded to 4 bytes a row; 0 = opaque.
+    mask = bytes(((size + 31) // 32) * 4 * size)
+    return header + bgra + mask
+
+
+def write_ico(path, image, sizes):
+    """Small frames as DIBs, the 256 as PNG.
+
+    The 256 frame only exists from Vista on, and only Explorer's large-icon
+    view reads it, so it can stay compressed (270 KB uncompressed vs 15 KB
+    PNG); the sizes the shell reaches for are the DIBs.
+    """
+    frames = []
+    for s in sizes:
+        if s >= 256:
+            buf = io.BytesIO()
+            image.resize((s, s), Image.LANCZOS).save(buf, "PNG", optimize=True)
+            frames.append((s, buf.getvalue()))
+        else:
+            frames.append((s, ico_frame(image, s)))
+    out = bytearray(struct.pack("<HHH", 0, 1, len(frames)))
+    offset = 6 + 16 * len(frames)
+    for size, blob in frames:
+        out += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(blob), offset)
+        offset += len(blob)
+    for _, blob in frames:
+        out += blob
+    with open(path, "wb") as f:
+        f.write(out)
+
+
 def main():
     icon = draw()
     png = os.path.join(ROOT, "assets", "branding", "app-icon.png")
     icon.save(png, optimize=True)
     ico = os.path.join(ROOT, "assets", "branding", "app-icon.ico")
-    icon.save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    write_ico(ico, icon, [16, 24, 32, 48, 64, 128, 256])
     bmp = os.path.join(ROOT, "packaging", "windows", "wizard-logo.bmp")
     write_bmp(bmp, icon.resize((64, 64), Image.LANCZOS))
     for p in (png, ico, bmp):
