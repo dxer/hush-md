@@ -320,6 +320,7 @@ pub fn block_bg(name: &str) -> Option<Hsla> {
 }
 
 /// Block palette swatch (what the picker shows for a block colour).
+#[allow(dead_code)] // used only through `editor_theme::bg_swatch`'s Craft branch
 pub fn bg_swatch(name: &str) -> Option<Hsla> {
     let (h, strong) = split(name)?;
     let m = hue::of(h)?;

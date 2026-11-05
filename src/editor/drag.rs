@@ -460,6 +460,7 @@ impl Editor {
             units: Rc::new(vec![]),
             eqnos: self.frame.eqnos.clone(),
             focused: false,
+            scale: self.frame.scale.max(1.),
             selected: Rc::new(HashSet::new()),
             targets: RefCell::new(vec![]),
             flat: None,

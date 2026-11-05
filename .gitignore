@@ -9,3 +9,6 @@
 
 /dist-release.*
 .wrangler/
+
+# CodeGraph 索引（本地工具数据）
+.codegraph/

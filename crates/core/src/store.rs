@@ -1,5 +1,5 @@
-//! On-disk library: one DocxXML file per document plus a small JSON index
-//! (pinned flag, timestamps) under `~/Documents/Hush.md`.
+//! On-disk library: a folder of Markdown notes, plus a small JSON index
+//! (pinned flag, timestamps) under `.hush/`.
 
 use crate::model::Document;
 use anyhow::Result;
@@ -139,31 +139,6 @@ pub struct Settings {
     pub window_size: Option<[f32; 2]>,
 }
 
-/// A document in the 回收站, as kept in `trash/index.json`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Trashed {
-    pub meta: Meta,
-    pub deleted: u64,
-    /// The page whose deletion took this one along (`None`: deleted itself).
-    /// Such pages are listed, restored and purged with that page.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root: Option<String>,
-}
-
-/// A row of the 回收站 page: a deleted page and how many went with it.
-#[derive(Clone, Debug)]
-pub struct TrashEntry {
-    pub id: String,
-    pub title: String,
-    pub icon: Option<String>,
-    pub deleted: u64,
-    /// Where it was: its parent page, `None` for the top of 我的文档库.
-    pub parent: Option<String>,
-}
-
-/// The 回收站 is emptied after 30 days.
-pub const TRASH_DAYS: u64 = 30;
-
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub id: String,
@@ -220,9 +195,24 @@ impl Store {
         crate::vault::Vault::default_root()
     }
 
-    /// Where an image source resolves to: a vault-relative path under the
-    /// vault, or an absolute one that already exists.
+    /// Where copied images and attachments live: `.hush/assets` inside the
+    /// vault, so the user's own folders keep only their files. Absolute
+    /// paths written by older versions stay valid, and so does a relative
+    /// `assets/…` source that was written before the move.
     pub fn assets_dir() -> PathBuf {
+        Self::root_dir().join(".hush/assets")
+    }
+
+    /// [`Self::assets_dir`], created first: a first paste into a fresh vault
+    /// has no `.hush/assets/` yet.
+    pub fn ensure_assets_dir() -> PathBuf {
+        let dir = Self::assets_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// Where a pasted image was copied before it moved under `.hush/`.
+    pub fn legacy_assets_dir() -> PathBuf {
         Self::root_dir().join("assets")
     }
 
@@ -237,7 +227,7 @@ impl Store {
         let empty = std::fs::read_dir(vault.root()).map(|rd| {
             rd.flatten().all(|e| {
                 let n = e.file_name().to_string_lossy().into_owned();
-                e.path().is_dir() || n.starts_with('.') || !(n.ends_with(".md") || n.ends_with(".markdown"))
+                e.path().is_dir() || n.starts_with('.') || !crate::vault::is_note_path(&e.path())
             })
         }).unwrap_or(false);
         if empty {
@@ -370,22 +360,24 @@ impl Store {
         self.vault.resolve(id).ok().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len()).unwrap_or(0)
     }
 
-    pub fn delete(&mut self, id: &str, _root: Option<&str>) -> Result<()> {
+    /// Move a note to the system trash. Fails with
+    /// [`crate::vault::NoTrash`] when the volume has none; the note and its
+    /// settings are left alone then.
+    pub fn delete(&mut self, id: &str) -> Result<()> {
         self.vault.delete(id)?;
+        self.forget(id)
+    }
+
+    /// Delete a note's file for good, after the user agreed no copy is kept.
+    pub fn delete_permanently(&mut self, id: &str) -> Result<()> {
+        self.vault.delete_permanently(id)?;
+        self.forget(id)
+    }
+
+    fn forget(&mut self, id: &str) -> Result<()> {
         self.notes.remove(id);
+        self.search.remove(id);
         self.save_notes()
-    }
-
-    pub fn list_trash(&mut self) -> Vec<TrashEntry> {
-        vec![]
-    }
-
-    pub fn restore(&mut self, _id: &str) -> Result<bool> {
-        Ok(false)
-    }
-
-    pub fn purge(&mut self, _id: &str) -> Result<()> {
-        Ok(())
     }
 
     /// Write a note's file from exact text, without re-serializing a model.
@@ -519,9 +511,20 @@ impl Store {
         Ok(new_rel)
     }
 
-    /// Delete a folder and the notes in it. The caller warns first.
+    /// Delete a folder and the notes in it, through the system trash.
     pub fn delete_folder(&mut self, rel: &str) -> Result<()> {
         self.vault.delete_folder(rel)?;
+        self.forget_folder(rel)
+    }
+
+    /// Delete a folder and the notes in it for good, after the user agreed
+    /// no copy is kept.
+    pub fn delete_folder_permanently(&mut self, rel: &str) -> Result<()> {
+        self.vault.delete_folder_permanently(rel)?;
+        self.forget_folder(rel)
+    }
+
+    fn forget_folder(&mut self, rel: &str) -> Result<()> {
         let prefix = format!("{rel}/");
         self.notes.retain(|id, _| !id.starts_with(&prefix));
         self.search.retain(|id, _| !id.starts_with(&prefix));
@@ -596,7 +599,14 @@ pub fn image_path_in(note: Option<&str>, src: &str) -> Option<PathBuf> {
         }
     }
     let full = Store::root_dir().join(p);
-    full.exists().then_some(full)
+    if full.exists() {
+        return Some(full);
+    }
+    // Images the app copied used to live in `assets/` at the vault root;
+    // a note written then still says `assets/<id>.png`. Look there too.
+    src.strip_prefix("assets/")
+        .map(|rest| Store::legacy_assets_dir().join(rest))
+        .filter(|p| p.exists())
 }
 
 #[cfg(test)]
@@ -634,7 +644,9 @@ mod tests {
         assert_eq!(list.len(), 1, "{list:?}");
         assert!(list[0].title.contains("hush.md"));
         // Opening it again does not add a second one, even after deleting it.
-        s.delete(&list[0].id, None).unwrap();
+        // (Permanent: the system trash is the user's, not the test's.)
+        s.delete_permanently(&list[0].id).unwrap();
+        assert!(!lib.0.join(&list[0].id).exists());
         let mut again = Store::open_at(lib.0.clone()).unwrap();
         assert_eq!(again.list().len(), 1, "a vault that had notes keeps its state");
     }
@@ -655,12 +667,16 @@ mod tests {
         std::fs::write(lib.0.join("notes.md"), "# First\n\nhello\n").unwrap();
         std::fs::create_dir(lib.0.join("sub")).unwrap();
         std::fs::write(lib.0.join("sub/deep.md"), "# Deep\n").unwrap();
+        std::fs::write(lib.0.join("long.markdown"), "# Long\n").unwrap();
         std::fs::write(lib.0.join("ignore.txt"), "not a note\n").unwrap();
         let mut s = lib.open();
         let list = s.list();
-        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(list.len(), 3, "{list:?}");
         assert_eq!(list[0].title, "First");
         assert!(list.iter().any(|e| e.id == "sub/deep.md"));
+        assert!(list.iter().any(|e| e.id == "long.markdown"));
+        assert!(!list.iter().any(|e| e.id == "ignore.txt"));
+        assert!(s.load("long.markdown").is_ok());
     }
 
     #[test]

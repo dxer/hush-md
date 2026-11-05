@@ -126,8 +126,8 @@ pub fn model_fingerprint(b: &crate::model::Block, out: &mut String) {
         BlockKind::Bullet => out.push('b'),
         BlockKind::Text => out.push('p'),
         BlockKind::Raw { tag, xml } => out.push_str(&format!("raw{tag}{xml}")),
-        BlockKind::Table(Table { header_rows, header_col, rows, .. }) => {
-            out.push_str(&format!("tbl{header_rows}{header_col}{}", rows.len()));
+        BlockKind::Table(Table { header_rows, header_col, rows, aligns, .. }) => {
+            out.push_str(&format!("tbl{header_rows}{header_col}{aligns:?}{}", rows.len()));
             for row in rows {
                 for cell in row {
                     out.push_str(&format!("|{}{}", cell.colspan, cell.rowspan));

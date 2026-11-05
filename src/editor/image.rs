@@ -187,7 +187,7 @@ impl ImageUi {
             toast: None,
             toast_task: None,
             remote: RefCell::default(),
-            remote_dir: Store::assets_dir().join("remote"),
+            remote_dir: Store::ensure_assets_dir().join("remote"),
             generation: 0,
             retried: HashMap::new(),
             file_drop: None,
@@ -1844,7 +1844,7 @@ pub(super) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static s
         .ok()
         .and_then(|r| r.into_dimensions().ok())
         .ok_or(BAD_DIMS)?;
-    let path = Store::assets_dir().join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    let path = Store::ensure_assets_dir().join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::write(&path, bytes).map_err(|_| BAD_DIMS)?;
     Ok(path)
 }
@@ -1861,7 +1861,7 @@ fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     image_block_from(&bytes, &ext)
 }
 
-/// File name of a remote image's download in `assets/remote`.
+/// File name of a remote image's download in `.hush/assets/remote`.
 fn remote_name(url: &str) -> String {
     let mut h = rustc_hash::FxHasher::default();
     url.hash(&mut h);

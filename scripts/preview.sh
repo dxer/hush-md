@@ -36,7 +36,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>hush.md</string>
   <key>CFBundleDisplayName</key><string>hush.md</string>
-  <key>CFBundleIdentifier</key><string>local.quietmd.preview</string>
+  <key>CFBundleIdentifier</key><string>local.hushmd.preview</string>
   <key>CFBundleExecutable</key><string>hush_md</string>
   <key>CFBundleIconFile</key><string>app-icon.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>

@@ -495,6 +495,18 @@ fn round_trip(c: &Core) -> Result<(), String> {
     if x != y {
         return Err(format!("save → load → save differs:\n--- first\n{x}\n--- second\n{y}"));
     }
+    md_round_trip(&doc)
+}
+
+/// The same round trip through the format the app actually stores: Markdown.
+/// It covers what users keep on disk, which DocxXML does not.
+fn md_round_trip(doc: &Document) -> Result<(), String> {
+    let x = crate::md::write(doc);
+    let back = crate::md::read(&x);
+    let y = crate::md::write(&back);
+    if x != y {
+        return Err(format!("Markdown save → load → save differs:\n--- first\n{x}\n--- second\n{y}"));
+    }
     Ok(())
 }
 

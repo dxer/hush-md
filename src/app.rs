@@ -164,26 +164,23 @@ pub struct RowMenu {
     pub folder: bool,
 }
 
-/// What the main pane shows: the open document, 主页 or 回收站.
+/// What the main pane shows: the open document, 主页 or 设置.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
     Doc,
     Home,
-    Trash,
     Settings,
 }
 
 /// A confirmation dialog and the pages it is about.
 #[derive(Clone, Debug)]
 pub enum Confirm {
-    /// 删除 (to the 回收站); `batch` for the 批量操作 selection.
+    /// 删除 (to the system trash); `batch` for the 批量操作 selection.
     Delete { ids: Vec<String>, batch: bool },
     /// Delete a whole folder and the notes inside it.
     DeleteFolder { path: String },
-    /// 回收站 → 恢复.
-    Restore(String),
-    /// 回收站 → 彻底删除.
-    Purge(String),
+    /// The volume has no trash: a second 确认 before deleting for good.
+    DeletePermanent { ids: Vec<String>, folder: Option<String> },
     /// 隐藏引用列表 (with 不再提示) / 显示引用列表.
     Refs { show: bool, no_ask: bool },
     /// The open document could not be written before it was to be replaced
@@ -261,10 +258,6 @@ pub struct Workspace {
     pub view: View,
     pub home: crate::home::Home,
     pub settings_scroll: ScrollHandle,
-    /// 回收站 rows, refreshed when the page opens or changes.
-    pub trash: Vec<crate::store::TrashEntry>,
-    /// A 回收站 row's menu: the page and where it opens.
-    pub trash_menu: Option<(String, Point<Pixels>, Corner)>,
     /// The toast and when it appeared.
     pub toast: Option<(ToastKind, SharedString, Instant)>,
     toast_task: Option<Task<()>>,
@@ -436,8 +429,6 @@ impl Workspace {
             view: View::Doc,
             home: Default::default(),
             settings_scroll: ScrollHandle::new(),
-            trash: vec![],
-            trash_menu: None,
             toast: None,
             toast_task: None,
             mode_menu: false,
@@ -657,19 +648,19 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Ask before 删除: a confirmation, then the 回收站.
-    pub fn ask_delete(&mut self, id: &str, cx: &mut Context<Self>) {
+    /// 删除 a single page without asking: it goes straight to the system
+    /// trash, and can be restored from Finder / Explorer.
+    pub fn ask_delete(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
         self.doc_menu = false;
         self.doc_sub = None;
-        self.confirm = Some(Confirm::Delete { ids: vec![id.to_string()], batch: false });
+        self.delete_docs(&[id.to_string()], window, cx);
         cx.notify();
     }
 
-    /// Move documents to the trash; if the open one goes, open the next.
+    /// Move documents to the system trash; if the open one goes, open the next.
     pub fn delete_docs(&mut self, ids: &[String], window: &mut Window, cx: &mut Context<Self>) {
-        // A page goes with its child pages: each topmost page is
-        // trashed as one item that carries its subtree.
+        // A page goes with its child pages: the subtree goes as one batch.
         let tree = crate::tree::Tree::new(&self.entries);
         let mut all: Vec<(String, Option<String>)> = vec![];
         for id in ids {
@@ -702,11 +693,14 @@ impl Workspace {
         }
         let mut deleted = vec![];
         let mut errors = vec![];
+        // A volume without a trash: ask once more, then delete for good.
+        let mut no_trash = vec![];
         for (id, root) in &groups {
             // Do not split a subtree when its root could not be deleted.
             if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
-            match self.store.delete(id, root.as_deref()) {
+            match self.store.delete(id) {
                 Ok(()) => deleted.push(id.clone()),
+                Err(e) if e.downcast_ref::<crate::vault::NoTrash>().is_some() => no_trash.push(id.clone()),
                 Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
             }
         }
@@ -723,7 +717,7 @@ impl Workspace {
         }
         self.row_menu = None;
         if self.current.is_none() {
-            // Stay on 主页 / 回收站 if that's where the delete came from.
+            // Stay on 主页 if that's where the delete came from.
             let view = self.view;
             match self.entries.first().map(|e| e.id.clone()) {
                 Some(next) => self.open(&next, window, cx),
@@ -732,12 +726,68 @@ impl Workspace {
             self.view = view;
         }
         self.sync_sub_pages(cx);
-        if self.view == View::Trash {
-            self.trash = self.store.list_trash();
-        }
         errors.extend(self.store.take_warnings().iter().map(|s| crate::settings::diagnostic(s)));
+        if errors.is_empty() && no_trash.is_empty() {
+            self.show_toast(crate::settings::text("已移到回收站"), cx);
+        } else if !errors.is_empty() {
+            let msg = errors.join("；");
+            self.show_toast_kind(ToastKind::Error, &msg, cx);
+            self.status = SaveStatus::Failed(msg);
+        }
+        if !no_trash.is_empty() {
+            // Sub-pages of a note that stayed behind would become top-level
+            // notes, so they go with it in the permanent delete too.
+            let carried: Vec<String> = groups.iter().filter(|(_, root)| root.as_ref().is_some_and(|r| no_trash.contains(r))).map(|(d, _)| d.clone()).collect();
+            for id in carried {
+                if !no_trash.contains(&id) {
+                    no_trash.push(id);
+                }
+            }
+            self.confirm = Some(Confirm::DeletePermanent { ids: no_trash, folder: None });
+        }
+        cx.notify();
+    }
+
+    /// Delete documents for good, after the 无回收站 confirmation.
+    pub fn delete_permanently(&mut self, ids: &[String], folder: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut errors = vec![];
+        if let Some(rel) = folder {
+            match self.store.delete_folder_permanently(rel) {
+                Ok(()) => {
+                    self.expanded.retain(|p| p != rel && !p.starts_with(&format!("{rel}/")));
+                }
+                Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete folder: {}", crate::settings::diagnostic(&e.to_string()))),
+            }
+        }
+        let mut deleted = vec![];
+        for id in ids {
+            match self.store.delete_permanently(id) {
+                Ok(()) => deleted.push(id.clone()),
+                Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+            }
+        }
+        let gone = |id: &str| folder.is_some_and(|rel| id.starts_with(&format!("{rel}/"))) || deleted.iter().any(|x| x == id);
+        if self.current.as_deref().is_some_and(gone) {
+            self.save_task = None;
+            self.unsaved = false;
+            self.current = None;
+            self.editor = None;
+            self.editor_sub = None;
+        }
+        self.entries = self.store.list();
+        self.folders = self.store.folders();
+        self.sort();
+        if self.current.is_none() {
+            let view = self.view;
+            match self.entries.first().map(|e| e.id.clone()) {
+                Some(next) => self.open(&next, window, cx),
+                None => self.new_doc(window, cx),
+            }
+            self.view = view;
+        }
+        self.sync_sub_pages(cx);
         if errors.is_empty() {
-            self.show_toast(crate::settings::text("已删除"), cx);
+            self.show_toast(crate::settings::text("已彻底删除"), cx);
         } else {
             let msg = errors.join("；");
             self.show_toast_kind(ToastKind::Error, &msg, cx);
@@ -773,15 +823,11 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Switch the main pane to 主页 or 回收站 (or back to the document).
+    /// Switch the main pane to 主页 or back to the document.
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
-        if view == View::Trash {
-            self.trash = self.store.list_trash();
-        }
         self.view = view;
         self.row_menu = None;
-        self.trash_menu = None;
         self.theme_menu = None;
         self.home.sort_menu = false;
         cx.notify();
@@ -1210,7 +1256,10 @@ impl Workspace {
                 self.entries = self.store.list();
                 self.folders = self.store.folders();
                 self.sort();
-                self.show_toast(crate::settings::text("已删除"), cx);
+                self.show_toast(crate::settings::text("已移到回收站"), cx);
+            }
+            Err(e) if e.downcast_ref::<crate::vault::NoTrash>().is_some() => {
+                self.confirm = Some(Confirm::DeletePermanent { ids: vec![], folder: Some(rel.to_string()) });
             }
             Err(e) => self.status = SaveStatus::Failed(crate::localized_format!("删除失败：{}", "Could not delete folder: {}", crate::settings::diagnostic(&e.to_string()))),
         }
@@ -1496,7 +1545,7 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.native_sidebar.sync(if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
-        let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
+        let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
@@ -1504,7 +1553,6 @@ impl Render for Workspace {
         let doc_menu = self.render_doc_menu(window, cx);
         let doc_info = self.render_doc_info(cx);
         let confirm = self.render_confirm(cx);
-        let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
         let toast = self.render_toast(window);
@@ -1534,7 +1582,6 @@ impl Render for Workspace {
                 )
                 .into_any_element(),
             View::Home => self.render_home(window, cx),
-            View::Trash => self.render_trash(cx),
             View::Settings => self.render_settings(cx),
         };
         let move_dlg = self.render_move_dialog(cx);
@@ -1642,7 +1689,6 @@ impl Render for Workspace {
             .children(doc_menu)
             .children(mode_menu)
             .children(doc_info)
-            .children(trash_menu)
             .children(home_menus)
             .children(theme_menu)
             .children(confirm)

@@ -14,6 +14,13 @@ categories = ["text-editors"]
 members = ["crates/core"]
 default-members = [".", "crates/core"]
 
+# The release binary ships stripped: the symbol table was 12 MB of the 52 MB
+# binary and no user-facing behaviour depends on it. `panic = "abort"` is
+# deliberately absent — src/editor/math.rs recovers from katex panics with
+# `catch_unwind`.
+[profile.release]
+strip = "symbols"
+
 [dependencies]
 hush_core = { path = "crates/core" }
 anyhow = "1.0.104"
@@ -32,6 +39,11 @@ regex = "1"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3"
 base64 = "0.22"
+# ```mermaid fences are drawn in the page. Pure Rust, no browser; the SVG it
+# emits is rasterized by the resvg/usvg GPUI already links.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
+resvg = "0.45.0"
+usvg = "0.45.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"

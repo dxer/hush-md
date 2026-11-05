@@ -83,18 +83,37 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `model.rs` | 文档模型 |
 | `source.rs` | block 的磁盘来源、原文、空行、指纹 |
 | `md.rs` | Markdown 解析、无损写回、序列化、标题提取 |
-| `vault.rs` | 文件夹扫描、读写文件、新建 / 重命名 / 删除、文件名校验 |
-| `store.rs` | 在 `vault` 之上提供 `Entry` / `Meta` 和每篇笔记的设置 |
+| `vault.rs` | 文件夹扫描、读写文件、新建 / 重命名 / 删除、文件名校验；删除走系统回收站 |
+| `store.rs` | 在 `vault` 之上提供 `Entry` / `Meta` 和每篇笔记的设置（没有应用内回收站，删除只经过 `vault`） |
 | `paste.rs` | HTML / Markdown 粘贴（含从飞书、网页粘贴） |
 | `docxml.rs` | DocxXML 读写，只用于和飞书互通，不再是存储格式 |
 | `markdown.rs` | 导出 Markdown（另一种选项集） |
 | `palette.rs`、`time.rs`、`lang.rs` | 色板、日期换算、代码语言表 |
 | `editor/core.rs`、`editor/table_ops.rs`、`editor/fuzz_tests.rs` | 编辑内核、表格操作、随机测试 |
 
-应用顶层（`src/`）：`app.rs`（`Workspace`）、`sidebar.rs` / `tree.rs`、`home.rs`、`search.rs`、`settings.rs`、`theme.rs` / `themes.rs`、`ui.rs` / `input.rs`、`html.rs` / `printing.rs` / `transfer.rs`、`guides.rs`（首次启动的欢迎笔记）。
+应用顶层（`src/`）：`app.rs`（`Workspace`）、`sidebar.rs` / `tree.rs`、`home.rs`、`search.rs`、`settings.rs`、`theme.rs` / `themes.rs`、`ui.rs` / `input.rs`、`html.rs` / `printing.rs` / `transfer.rs`、`welcome`（首次启动的欢迎笔记，在 `crates/core/src/welcome.rs`）。
 
-编辑器（`src/editor/`）：`view.rs`、`keymap.rs`、`render.rs`、`text.rs`、`overlays.rs`、`table.rs`、`image.rs`、`math.rs`、`link.rs`、`find.rs` 等。源码视图是 `source_view.rs`；切换与原文保存在 `view.rs` 的 `toggle_source` / `apply_source` / `join_source`，页面在 `render.rs` 的 `render_source`。
+编辑器（`src/editor/`）：`view.rs`、`keymap.rs`、`render.rs`、`text.rs`、`overlays.rs`、`table.rs`、`image.rs`、`math.rs`、`mermaid.rs`、`link.rs`、`find.rs` 等。源码视图是 `source_view.rs`；切换与原文保存在 `view.rs` 的 `toggle_source` / `apply_source` / `join_source`，页面在 `render.rs` 的 `render_source`。
+
+## 图表
+
+```` ```mermaid ```` 围栏在渲染视图里画成图：`mermaid.rs` 用 `mermaid-rs-renderer`（纯 Rust，无浏览器）把源码变成 SVG，再用 GPUI 已经链接的 `usvg` / `resvg` 光栅化，最后以 `img(ImageSource::Render(..))` 画出来。
+
+- GPUI 自己的 `svg()` 元素画的是**单色 alpha 遮罩**，所以彩色图表必须走位图这条路。
+- `usvg::Options` 默认不带字体，不 `load_system_fonts()` 的话所有标签都是空白。
+- 光栅只缓存在内存里（按源码文本 + 缩放比），不写进笔记库：它是派生数据。
+- 解析失败（语法错误、不认识的图类型）时退回普通代码块，源码始终可编辑。
+- 文件里保存的永远是那段图表源码，`md.rs` 的往返测试覆盖了这一点。
 
 ## 界面语言
 
 界面支持简体中文与英文，偏好保存在 `Preferences::english`。静态文案用 `settings::text` / `label` 的映射，成对文案用 `settings::tr`，带参数用 `localized_format!`。用户写的笔记内容不是翻译键。
+
+## 和 quiet.md 的关系
+
+hush.md 起步时借鉴了 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT，作者 s1dashu）：界面、块模型和编辑内核来自那里。此后两边独立演进，**本仓库不跟踪 quiet.md 的更新**，没有上游同步脚本或 merge 记录。
+
+- **来自 quiet.md 的部分**：`model.rs` 的块模型、`editor/core.rs` 的编辑内核和撤销栈、表格操作、`theme.rs` / `ui.rs` / `settings.rs` / `home.rs` / `sidebar.rs` 等界面骨架、`docxml.rs`、`feishu_theme.rs`、`palette.rs`，以及 `vendor/` 三个本地补丁（注释仍写 `quiet.md:`）。
+- **hush.md 独有的部分**：`md.rs`（Markdown 解析与无损写回）、`source.rs`（逐字节保留策略）、`vault.rs` / `store.rs` 的文件夹库、系统回收站删除、`.hush/` 布局。
+- **手工回移**：如果 quiet.md 修了编辑内核的 bug，需要自己对照那一个提交改过来，并补一次 `scripts/check.sh`；没有自动机制。
+

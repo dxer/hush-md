@@ -17,6 +17,8 @@ use std::rc::Rc;
 /// Per-frame render context shared by all blocks.
 pub(super) struct R<'a> {
     pub ed: &'a Editor,
+    /// Window scale factor (diagram rasters are made at device pixels).
+    pub scale: f32,
     pub units: Rc<Vec<Unit>>,
     /// Equation numbers before each block that has equations.
     pub eqnos: Rc<HashMap<BlockId, u32>>,
@@ -41,6 +43,8 @@ pub(super) struct Frame {
     pub eqnos: Rc<HashMap<BlockId, u32>>,
     selected: Rc<HashSet<BlockId>>,
     focused: bool,
+    /// Window scale: diagram rasters are made at device pixels.
+    pub scale: f32,
 }
 
 /// One row of the virtualized page.
@@ -733,6 +737,13 @@ impl R<'_> {
     }
 
     fn code_block(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<Editor>) -> AnyElement {
+        // A ```mermaid fence draws the diagram; the header keeps the language
+        // button, 复制 and 自动换行, and the source stays under 源码视图.
+        if lang == crate::editor::mermaid::LANG
+            && let Some(diagram) = self.ed.mermaid_block(b, self.scale)
+        {
+            return diagram;
+        }
         if crate::settings::feishu() { return self.code_block_feishu(b, lang, wrap, cx); }
 
         let id = b.id;
@@ -1021,6 +1032,95 @@ impl R<'_> {
 /// Code blocks: SF Mono 13 / 20, a 36pt line-number gutter.
 const GUTTER_W: f32 = 36.;
 
+impl Editor {
+    /// A ```mermaid fence drawn as a diagram. `None` means "draw it as code":
+    /// the source does not parse, or it is folded. The header keeps the same
+    /// language button, 复制 and 自动换行 as a code block, so the source is
+    /// always one click away.
+    fn mermaid_block(&self, b: &Block, scale: f32) -> Option<AnyElement> {
+        let id = b.id;
+        if self.code_folded.contains(&id) {
+            return None;
+        }
+        let raster = super::mermaid::raster(&b.text.text, &super::mermaid::theme(), scale)?;
+        let g = SharedString::from(format!("code-{}", id.0));
+        let text = b.text.text.clone();
+        let radius = theme::style().num("pre.radius");
+        let button = |key: &'static str| {
+            div()
+                .id((key, id.0))
+                .h(px(22.))
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .rounded(px(4.))
+                .text_size(px(14.))
+                .line_height(px(22.))
+                .text_color(Theme::text_caption())
+                .cursor_pointer()
+                .hover(|s| s.bg(Theme::fill_hover_strong()))
+        };
+        let (w, h) = (raster.size.width, raster.size.height);
+        Some(
+            div()
+                .id(("mermaid", id.0))
+                .relative()
+                .group(g.clone())
+                .rounded(px(radius))
+                .border_1()
+                .border_color(Theme::code_border())
+                .bg(Theme::code_bg())
+                .hover(|s| s.border_color(theme::c(craft::N400)))
+                // The diagram sits centred on the block's own background, at
+                // its natural size (the page scrolls, it never squeezes it).
+                .child(
+                    div()
+                        .pt(px(36.))
+                        .pb(px(12.))
+                        .px(px(16.))
+                        .flex()
+                        .justify_center()
+                        .child(img(ImageSource::Render(raster.image)).w(w).h(h).flex_none()),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(32.))
+                        .pt(px(6.))
+                        .pr(px(6.))
+                        .pl(px(12.))
+                        .flex()
+                        .items_center()
+                        .font_family(theme::UI_FONT)
+                        .child(div().flex_1().text_size(px(14.)).text_color(Theme::text()).child(super::mermaid::LANG))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .gap(px(8.))
+                                .opacity(0.)
+                                .group_hover(g, |s| s.opacity(1.))
+                                .child(
+                                    button("mermaid-copy")
+                                        .child(icon("copy", 14., Theme::text_caption()))
+                                        .child(crate::settings::tr("复制", "Copy"))
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                                        }),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
 pub(super) const TOP: Env = Env { depth: 0, cell: false, color: None, in_callout: false, root: true, column: false, quote: false, width: 0. };
 
 impl Editor {
@@ -1130,6 +1230,7 @@ impl Editor {
         }
         let mut r = R {
             ed: self,
+            scale: self.frame.scale.max(1.),
             units: self.frame.units.clone(),
             eqnos: self.frame.eqnos.clone(),
             focused: self.frame.focused,
@@ -1342,6 +1443,7 @@ impl Editor {
             eqnos,
             selected: Rc::new(self.core.block_sel_ids().into_iter().collect()),
             focused,
+            scale: window.scale_factor(),
         };
         // Filled in as the list renders its visible items.
         self.handle_targets.clear();

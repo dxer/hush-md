@@ -15,7 +15,8 @@ use crate::model::BlockKind;
 use crate::search::doc_icon;
 use crate::store::Entry;
 use crate::theme::{self, Theme};
-use crate::trash::{empty_state, list_header_text, list_line, menu_label, page_header, row_hover};
+use crate::dialogs::{empty_state, menu_label, page_header};
+use crate::ui::{list_header_text, list_line, row_hover};
 use crate::ui::{ROW_RADIUS, TipExt, icon, menu_glyph, menu_row, popover, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
@@ -74,7 +75,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                     crate::model::TableCell { blocks: thumb_blocks(&cell.blocks, budget, depth + 1, numbers, eqnos), bg: cell.bg.clone(), valign: cell.valign.clone(),
                         colspan: cell.colspan.min((nc - c) as u32), rowspan: cell.rowspan.min((nr - r) as u32) }
                 }).collect()).collect();
-                BlockKind::Table(crate::model::Table { col_widths: t.col_widths.iter().take(nc).copied().collect(), header_rows: t.header_rows.min(nr), header_col: t.header_col, rows })
+                BlockKind::Table(crate::model::Table { col_widths: t.col_widths.iter().take(nc).copied().collect(), header_rows: t.header_rows.min(nr), header_col: t.header_col, rows, aligns: t.aligns.iter().take(nc).copied().collect() })
             }
             BlockKind::Image { src, width, height, .. } => {
                 let mut kind = b.kind.clone();
@@ -408,8 +409,8 @@ impl Workspace {
         use std::hash::{Hash, Hasher};
         // A note's "children" are the notes in the folder of the same name
         // beside it: `notes/a.md` holds what `notes/` contains.
-        let stem = e.id.trim_end_matches(".md").trim_end_matches(".markdown");
-        let children: Vec<&Entry> = self.entries.iter().filter(|p| crate::tree::folder_of(&p.id).as_deref() == Some(stem)).collect();
+        let stem = hush_core::vault::path_stem_of(&e.id);
+        let children: Vec<&Entry> = self.entries.iter().filter(|p| crate::tree::folder_of(&p.id).as_deref() == Some(stem.as_str())).collect();
         let mut stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut stamp);
         crate::settings::feishu().hash(&mut stamp);

@@ -1,10 +1,10 @@
 # 第三方组件与素材
 
-hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档引擎的一部分来自 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT，Copyright (c) 2026 s1dashu）。下面是随它一起分发的第三方代码和素材。
+hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档引擎起步时取自 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT，Copyright (c) 2026 s1dashu），之后独立演进。下面是随它一起分发的第三方代码和素材。
 
 ## Rust 依赖
 
-由 `cargo metadata` 生成，共 741 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
+由 `cargo metadata` 生成，共 760 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
 
 要重新生成这张表：`scripts/licences.sh`（从 `cargo metadata` 取全部依赖）。
 
@@ -16,6 +16,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | aho-corasick | 1.1.5 | Unlicense OR MIT |
 | aligned | 0.4.3 | MIT OR Apache-2.0 |
 | aligned-vec | 0.6.4 | MIT |
+| android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 |
 | ar_archive_writer | 0.5.3 | Apache-2.0 WITH LLVM-exception |
 | arbitrary | 1.5.0 | MIT OR Apache-2.0 |
@@ -88,6 +89,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | cfg_aliases | 0.2.2 | MIT |
 | cgl | 0.3.2 | MIT / Apache-2.0 |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 |
+| chrono | 0.4.45 | MIT OR Apache-2.0 |
 | cipher | 0.4.4 | MIT OR Apache-2.0 |
 | clang-sys | 1.9.1 | Apache-2.0 |
 | cocoa | 0.25.0 | MIT OR Apache-2.0 |
@@ -212,6 +214,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
+| gif | 0.13.3 | MIT OR Apache-2.0 |
 | gif | 0.14.2 | MIT OR Apache-2.0 |
 | glob | 0.3.4 | MIT OR Apache-2.0 |
 | globset | 0.4.20 | Unlicense OR MIT |
@@ -256,6 +259,8 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | hyper | 1.12.0 | MIT |
 | hyper-rustls | 0.27.10 | Apache-2.0 OR ISC OR MIT |
 | hyper-util | 0.1.21 | MIT |
+| iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
+| iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
 | icu_collections | 2.3.0 | Unicode-3.0 |
 | icu_locale_core | 2.3.0 | Unicode-3.0 |
 | icu_normalizer | 2.3.0 | Unicode-3.0 |
@@ -284,6 +289,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
 | jobserver | 0.1.35 | MIT OR Apache-2.0 |
 | js-sys | 0.3.106 | MIT OR Apache-2.0 |
+| json5 | 1.3.7 | MIT |
 | katex-rs | 0.3.0 | MIT |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT |
@@ -318,6 +324,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memmap2 | 0.9.11 | MIT OR Apache-2.0 |
 | memoffset | 0.9.1 | MIT |
+| mermaid-rs-renderer | 0.3.1 | MIT |
 | metal | 0.29.0 | MIT OR Apache-2.0 |
 | mime | 0.3.17 | MIT OR Apache-2.0 |
 | mime_guess | 2.0.5 | MIT |
@@ -587,12 +594,14 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
 | tracing-core | 0.1.36 | MIT |
+| trash | 5.2.9 | MIT |
 | try-lock | 0.2.5 | MIT |
 | ttf-parser | 0.20.0 | MIT OR Apache-2.0 |
 | ttf-parser | 0.21.1 | MIT OR Apache-2.0 |
 | ttf-parser | 0.25.1 | MIT OR Apache-2.0 |
 | typeid | 1.0.3 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
+| ucd-trie | 0.1.7 | MIT OR Apache-2.0 |
 | uds_windows | 1.2.1 | MIT |
 | unicase | 2.10.0 | MIT OR Apache-2.0 |
 | unicode-bidi | 0.3.18 | MIT OR Apache-2.0 |
@@ -610,6 +619,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | untrusted | 0.9.0 | ISC |
 | url | 2.5.8 | MIT OR Apache-2.0 |
+| urlencoding | 2.1.3 | MIT |
 | usvg | 0.45.1 | Apache-2.0 OR MIT |
 | utf-8 | 0.7.6 | MIT OR Apache-2.0 |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |
@@ -650,11 +660,15 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
 | windows | 0.57.0 | MIT OR Apache-2.0 |
 | windows | 0.61.3 | MIT OR Apache-2.0 |
+| windows | 0.62.2 | MIT OR Apache-2.0 |
 | windows-capture | 1.5.0 | MIT |
 | windows-collections | 0.2.0 | MIT OR Apache-2.0 |
+| windows-collections | 0.3.2 | MIT OR Apache-2.0 |
 | windows-core | 0.57.0 | MIT OR Apache-2.0 |
 | windows-core | 0.61.2 | MIT OR Apache-2.0 |
+| windows-core | 0.62.2 | MIT OR Apache-2.0 |
 | windows-future | 0.2.1 | MIT OR Apache-2.0 |
+| windows-future | 0.3.2 | MIT OR Apache-2.0 |
 | windows-implement | 0.57.0 | MIT OR Apache-2.0 |
 | windows-implement | 0.60.2 | MIT OR Apache-2.0 |
 | windows-interface | 0.57.0 | MIT OR Apache-2.0 |
@@ -662,12 +676,15 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | windows-link | 0.1.3 | MIT OR Apache-2.0 |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 |
 | windows-numerics | 0.2.0 | MIT OR Apache-2.0 |
+| windows-numerics | 0.3.1 | MIT OR Apache-2.0 |
 | windows-registry | 0.4.0 | MIT OR Apache-2.0 |
 | windows-registry | 0.5.3 | MIT OR Apache-2.0 |
 | windows-result | 0.1.2 | MIT OR Apache-2.0 |
 | windows-result | 0.3.4 | MIT OR Apache-2.0 |
+| windows-result | 0.4.1 | MIT OR Apache-2.0 |
 | windows-strings | 0.3.1 | MIT OR Apache-2.0 |
 | windows-strings | 0.4.2 | MIT OR Apache-2.0 |
+| windows-strings | 0.5.1 | MIT OR Apache-2.0 |
 | windows-sys | 0.48.0 | MIT OR Apache-2.0 |
 | windows-sys | 0.52.0 | MIT OR Apache-2.0 |
 | windows-sys | 0.59.0 | MIT OR Apache-2.0 |
@@ -676,6 +693,7 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 |
 | windows-targets | 0.53.5 | MIT OR Apache-2.0 |
 | windows-threading | 0.1.0 | MIT OR Apache-2.0 |
+| windows-threading | 0.2.1 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.53.1 | MIT OR Apache-2.0 |
@@ -710,7 +728,6 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | x11-clipboard | 0.9.3 | MIT |
 | x11rb | 0.13.2 | MIT OR Apache-2.0 |
 | x11rb-protocol | 0.13.2 | MIT OR Apache-2.0 |
-| xattr | 0.2.3 | MIT/Apache-2.0 |
 | xcb | 1.7.1 | MIT |
 | xcursor | 0.3.11 | MIT |
 | xim-ctext | 0.3.0 | MIT |
@@ -745,16 +762,14 @@ hush.md 以 MIT 协议发布（见 [LICENSE](LICENSE)）。它的界面和文档
 | zerovec-derive | 0.11.6 | Unicode-3.0 |
 | zlib-rs | 0.6.8 | Zlib |
 | zmij | 1.0.23 | MIT |
+| zune-core | 0.4.12 | MIT OR Apache-2.0 OR Zlib |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib |
 | zune-inflate | 0.2.54 | MIT OR Apache-2.0 OR Zlib |
+| zune-jpeg | 0.4.21 | MIT OR Apache-2.0 OR Zlib |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
 | zvariant | 5.15.1 | MIT |
 | zvariant_derive | 5.15.1 | MIT |
 | zvariant_utils | 4.2.0 | MIT |
-
-## Windows 运行库
-
-Windows 安装包随附未修改的 Microsoft Visual C++ Runtime `vcruntime140.dll`，从 Visual Studio 的 x64 Redistributable 目录复制。它受微软的分发许可约束，不属于本项目的 MIT 许可；参见 [Visual Studio 2022 Redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution)。源码仓库不包含该二进制文件。
 
 ## 字体
 

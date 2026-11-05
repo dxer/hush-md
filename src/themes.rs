@@ -3,7 +3,7 @@
 //! blocks are drawn) and the named colours; rules on `.page`, `h1`, `code`,
 //! `blockquote` … set the rest (docs/THEMES.md). Built-in themes ship as
 //! complete files (`assets/themes/*.css`); the user's own live in
-//! `<library>/themes/*.css`, and one named after a built-in replaces it.
+//! `<library>/.hush/themes/*.css`, and one named after a built-in replaces it.
 
 use crate::editor_theme::TOKENS;
 use gpui::Hsla;
@@ -312,7 +312,7 @@ pub fn generation() -> u64 { GENERATION.load(Ordering::Relaxed) }
 pub fn themes() -> std::sync::RwLockReadGuard<'static, Vec<Theme>> { THEMES.read().unwrap() }
 /// Files that could not be read at all, from the last load.
 pub fn errors() -> Vec<String> { ERRORS.read().unwrap().clone() }
-pub fn dir() -> PathBuf { crate::store::Store::root_dir().join("themes") }
+pub fn dir() -> PathBuf { crate::store::Store::root_dir().join(".hush/themes") }
 
 // ---- CSS
 

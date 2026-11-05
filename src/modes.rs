@@ -3,7 +3,7 @@
 
 use crate::app::Workspace;
 use crate::theme::{self, Theme, craft};
-use crate::trash::menu_label;
+use crate::dialogs::menu_label;
 use crate::ui::{ToastKind, icon, menu_glyph, menu_row, popover};
 use gpui::{prelude::FluentBuilder, *};
 
@@ -181,7 +181,7 @@ impl Workspace {
                         .border_b_1()
                         .border_color(Theme::line_divider())
                         .child(div().flex_1().text_size(px(15.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).child(crate::settings::tr("快捷键", "Keyboard shortcuts")))
-                        .child(crate::trash::close_button("shortcuts-close").mr(px(5.)).on_click(cx.listener(|w, _, _, cx| {
+                        .child(crate::dialogs::close_button("shortcuts-close").mr(px(5.)).on_click(cx.listener(|w, _, _, cx| {
                             w.shortcuts = false;
                             cx.notify();
                         }))),

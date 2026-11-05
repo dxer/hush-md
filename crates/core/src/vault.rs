@@ -1,14 +1,14 @@
 //! The vault: a folder of Markdown files, opened as is.
 //!
 //! There is no index and no database. The tree on disk *is* the tree in the
-//! UI: every `.md` file under the opened folder is a note, every subfolder is
-//! a branch, and a note's title is its first heading (falling back to its
-//! file name). Saves write back to the same file, atomically; nothing else in
-//! the folder is touched.
+//! UI: every `.md` / `.markdown` file under the opened folder is a note,
+//! every subfolder is a branch, and a note's title is its first heading
+//! (falling back to its file name). Saves write back to the same file,
+//! atomically. Deleting a note moves it to the system trash (Finder,
+//! Explorer, freedesktop), so it can be brought back outside the app.
 //!
-//! Settings that belong to the vault rather than to a note (sidebar width,
-//! theme, pinned order) live in `.hush/settings.json` inside it, which is the
-//! only file this app creates on its own.
+//! Everything the app creates lives under `.hush/` in the vault: settings,
+//! per-note preferences, copied images and attachments, and theme files.
 
 use crate::model::{display_title, Document};
 use anyhow::{Context, Result};
@@ -18,7 +18,37 @@ use std::time::UNIX_EPOCH;
 
 /// What the app calls a note with no heading and no usable file name.
 pub const UNTITLED_FILE: &str = "未命名";
+/// The extension a new note gets.
 pub const EXT: &str = "md";
+/// Every extension that makes a file a note.
+pub const EXTENSIONS: [&str; 2] = ["md", "markdown"];
+
+/// Whether `path` is a note by its extension.
+pub fn is_note_path(path: &Path) -> bool {
+    path.extension().and_then(|x| x.to_str()).is_some_and(|x| EXTENSIONS.iter().any(|e| x.eq_ignore_ascii_case(e)))
+}
+
+/// A name without a note extension; other extensions are left alone.
+fn strip_ext(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) if EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)) => stem.to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// A note's file name without its extension (`notes/b.markdown` → `b`).
+pub fn stem_of(rel: &str) -> String {
+    strip_ext(rel.rsplit('/').next().unwrap_or(rel))
+}
+
+/// A note's vault-relative path without its extension (`notes/b.markdown` →
+/// `notes/b`). This is the folder a note's sub-pages live in.
+pub fn path_stem_of(rel: &str) -> String {
+    match rel.rsplit_once('/') {
+        Some((dir, name)) => format!("{dir}/{}", strip_ext(name)),
+        None => strip_ext(rel),
+    }
+}
 
 /// A folder in the vault that holds notes (directly or deeper).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +93,20 @@ pub struct Vault {
     titles: HashMap<String, (u64, String)>,
     pub warnings: Vec<String>,
 }
+
+/// Deleting failed because the volume has no trash to put the file in
+/// (a network share, a FAT stick, a mount that opts out). The file is still
+/// there; the user decides whether to delete it for good.
+#[derive(Debug)]
+pub struct NoTrash(pub String);
+
+impl std::fmt::Display for NoTrash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NoTrash {}
 
 impl Vault {
     /// `HUSH_MD_HOME`, else `HUSH.md` in the user's Documents.
@@ -157,7 +201,7 @@ impl Vault {
                         holding.insert(rel);
                     }
                 }
-            } else if path.extension().is_some_and(|x| x == EXT)
+            } else if is_note_path(&path)
                 && let Some(parent) = path.parent().and_then(|p| p.strip_prefix(&self.root).ok())
             {
                 let mut cur = parent.to_string_lossy().replace('\\', "/");
@@ -187,7 +231,7 @@ impl Vault {
                 if self.has_note_below(&path) {
                     return true;
                 }
-            } else if path.extension().is_some_and(|x| x == EXT) {
+            } else if is_note_path(&path) {
                 return true;
             }
         }
@@ -204,7 +248,7 @@ impl Vault {
         let mut out: Vec<PathBuf> = rd
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == EXT))
+            .filter(|p| p.is_file() && is_note_path(p))
             .collect();
         out.sort();
         out
@@ -223,12 +267,12 @@ impl Vault {
                 self.walk(&path, out);
                 continue;
             }
-            if path.extension().is_none_or(|x| x != EXT) {
+            if !is_note_path(&path) {
                 continue;
             }
             let Ok(rel) = path.strip_prefix(&self.root) else { continue };
             let rel = rel.to_string_lossy().replace('\\', "/");
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let stem = stem_of(path.file_name().unwrap_or_default().to_string_lossy().as_ref());
             let folder = rel.rsplit_once('/').map(|(d, _)| d.to_string());
             let (created, modified, size) = stat(&path);
             let title = self.title_of(&rel, &path, modified);
@@ -319,8 +363,16 @@ impl Vault {
         Ok(new_rel)
     }
 
-    /// Delete a folder and everything in it.
+    /// Delete a folder and everything in it, through the system trash.
+    /// See [`Vault::delete`] for the no-trash case.
     pub fn delete_folder(&self, rel: &str) -> Result<()> {
+        let path = self.resolve(rel)?;
+        trash::delete(&path).map_err(|e| anyhow::Error::new(NoTrash(e.to_string())))
+    }
+
+    /// Remove a folder and its notes for good, after the user has agreed
+    /// that no copy will be kept.
+    pub fn delete_folder_permanently(&self, rel: &str) -> Result<()> {
         let path = self.resolve(rel)?;
         std::fs::remove_dir_all(&path).with_context(|| format!("无法删除 {}", path.display()))
     }
@@ -346,9 +398,22 @@ impl Vault {
         }
     }
 
+    /// Delete a note by moving its file to the system trash (Finder on
+    /// macOS, the Recycle Bin on Windows, freedesktop elsewhere), so it can
+    /// be brought back without the app.
+    ///
+    /// When the volume has no trash — a network share, a FAT stick, a mount
+    /// that opts out — the error is a [`NoTrash`] and the file stays put.
+    /// Nothing is ever deleted outright without the caller asking first.
     pub fn delete(&self, rel: &str) -> Result<()> {
         let path = self.resolve(rel)?;
-        // The file goes away; the caller warns before calling this.
+        trash::delete(&path).map_err(|e| anyhow::Error::new(NoTrash(e.to_string())))
+    }
+
+    /// Remove a note's file for good, after the user has agreed that no copy
+    /// will be kept.
+    pub fn delete_permanently(&self, rel: &str) -> Result<()> {
+        let path = self.resolve(rel)?;
         std::fs::remove_file(&path).with_context(|| format!("无法删除 {}", path.display()))
     }
 
@@ -489,6 +554,36 @@ mod tests {
         assert!(titles.contains(&"Beta"));
         assert_eq!(list.len(), 2, "{titles:?}");
         assert!(vault.read("ideas/b.md").unwrap().blocks.iter().any(|b| matches!(b.kind, crate::model::BlockKind::Heading { level: 1, .. })));
+    }
+
+    #[test]
+    fn markdown_and_md_both_make_a_note() {
+        let v = V::new();
+        std::fs::write(v.0.join("a.md"), "# A\n").unwrap();
+        std::fs::write(v.0.join("b.markdown"), "# B\n").unwrap();
+        std::fs::write(v.0.join("Note.MD"), "# C\n").unwrap();
+        std::fs::write(v.0.join("s.markdown.txt"), "x").unwrap();
+        let mut vault = v.open();
+        let titles: Vec<String> = vault.list().into_iter().map(|n| n.title).collect();
+        assert!(titles.iter().any(|t| t == "A"), "{titles:?}");
+        assert!(titles.iter().any(|t| t == "B"), "{titles:?}");
+        assert!(titles.iter().any(|t| t == "C"), "{titles:?}");
+        assert_eq!(titles.len(), 3, "{titles:?}");
+        assert!(vault.read("b.markdown").is_ok());
+    }
+
+    #[test]
+    fn stem_drops_only_a_note_extension() {
+        assert_eq!(stem_of("a/b.markdown"), "b");
+        assert_eq!(stem_of("X.MD"), "X");
+        assert_eq!(stem_of("a.b.md"), "a.b");
+        assert_eq!(stem_of("plain"), "plain");
+        assert_eq!(stem_of("dir/notes.txt"), "notes.txt");
+        // Sub-pages live in the folder beside the note, so the path matters.
+        assert_eq!(path_stem_of("notes/a.md"), "notes/a");
+        assert_eq!(path_stem_of("deep/notes/a.markdown"), "deep/notes/a");
+        assert_eq!(path_stem_of("a.md"), "a");
+        assert_eq!(path_stem_of("X.MD"), "X");
     }
 
     #[test]

@@ -216,7 +216,7 @@ impl Workspace {
             .child(
                 menu_item("dm-delete", "bin", crate::settings::text("删除"), false, false)
                     .on_hover(hover_sub(None))
-                    .on_click(cx.listener(move |w, _, _, cx| w.ask_delete(&del_id, cx))),
+                    .on_click(cx.listener(move |w, _, window, cx| w.ask_delete(&del_id, window, cx))),
             )
             .child(divider())
             .child(

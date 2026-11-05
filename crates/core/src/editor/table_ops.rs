@@ -350,6 +350,7 @@ impl Core {
             header_rows: if r.top == 0 { t.header_rows } else { 0 },
             header_col: t.header_col && r.left == 0,
             rows: t.rows[r.top..=r.bottom].iter().map(|row| row[r.left..=r.right].to_vec()).collect(),
+            aligns: t.aligns.iter().skip(r.left).take(r.right - r.left + 1).copied().collect(),
         };
         sub.repair();
         vec![Block::new(BlockKind::Table(sub), RichText::default()).fresh_ids()]
@@ -370,6 +371,7 @@ mod tests {
             rows: (0..nr)
                 .map(|r| (0..nc).map(|c| TableCell { blocks: vec![Block::text(&format!("{r}{c}"))], ..TableCell::empty() }).collect())
                 .collect(),
+            aligns: vec![],
         };
         let b = Block::new(BlockKind::Table(t), RichText::default());
         let id = b.id;

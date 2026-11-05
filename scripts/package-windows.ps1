@@ -46,7 +46,7 @@ try {
         $scriptPath = $signScript.Replace('$', '$$')
         $toolPath = $SignTool.Replace('$', '$$')
         $signCommand = '$q{0}$q -NoProfile -ExecutionPolicy Bypass -File $q{1}$q -CertificateThumbprint {2} -TimestampUrl $q{3}$q -SignTool $q{4}$q -FilePath $f' -f $ps, $scriptPath, $CertificateThumbprint, $TimestampUrl, $toolPath
-        $compilerArgs += @('/DSigned', "/Squietmd=$signCommand")
+        $compilerArgs += @('/DSigned', "/Shushmd=$signCommand")
     }
     & $Iscc @compilerArgs packaging/windows/hush-md.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }

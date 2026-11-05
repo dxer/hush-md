@@ -244,7 +244,7 @@ impl Workspace {
             }
         }
 
-        // The footer holds one row: 设置 (存储管理 and 回收站 live in 设置).
+        // The footer holds one row: 设置.
         // The 批量操作 toolbar keeps the footer glyphs: bare on the sidebar, a rounded fill on hover.
         let footer_btn = |id: &'static str, name: &'static str, tip: &'static str, enabled: bool, on: bool| {
             let group = SharedString::from(format!("{id}-slot"));
@@ -1047,7 +1047,7 @@ impl Workspace {
             .child(
                 item_c("rm-del", "bin", crate::settings::text("删除"), Theme::danger(), Theme::danger())
                     .on_hover(set_sub(false))
-                    .on_click(cx.listener(move |w, _, _, cx| w.ask_delete(&del, cx))),
+                    .on_click(cx.listener(move |w, _, window, cx| w.ask_delete(&del, window, cx))),
             );
         let vh = f32::from(window.viewport_size().height);
         let menu_h = row_menu_height(8, 2);

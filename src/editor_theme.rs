@@ -1,4 +1,4 @@
-pub use crate::theme::{craft, c, ca, rgbaf, TITLE, UI_FONT, MONO_FONT, BlockMetrics};
+pub use crate::theme::{craft, c, ca, rgbaf, UI_FONT, MONO_FONT, BlockMetrics};
 /// The active theme's resolved style (themes.rs).
 pub fn style() -> &'static crate::themes::Style { crate::themes::active() }
 pub fn body_size() -> f32 { style().num("page.size") }
@@ -22,6 +22,7 @@ macro_rules! tokens {
     ($($n:ident),* $(,)?) => {
         #[allow(non_camel_case_types)]
         #[derive(Clone, Copy)]
+        #[allow(dead_code)]
         enum Tok { $($n),* }
         /// Names a theme file uses for the colour tokens, in index order.
         pub const TOKENS: &[&str] = &[$(stringify!($n)),*];
@@ -31,6 +32,8 @@ macro_rules! tokens {
             if feishu { (ALL[i].0)() } else { (ALL[i].1)() }
         }
         pub struct Theme;
+        // Tokens a theme file may name even when no UI code calls them yet.
+        #[allow(dead_code)]
         impl Theme {
             $(pub fn $n() -> gpui::Hsla { crate::themes::color(Tok::$n as usize).unwrap_or_else(|| base_color(Tok::$n as usize, crate::settings::feishu())) })*
         }
@@ -53,7 +56,6 @@ fn hue(name: &str) -> &str { name.strip_prefix("light-").or_else(|| name.strip_p
 pub fn text_color(name: &str) -> Option<gpui::Hsla> { style().palette("color", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::text_color(name) } else { crate::theme::text_color(name) }) }
 pub fn bg_color(name: &str) -> Option<gpui::Hsla> { style().palette("highlight", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::bg_color(name) } else { crate::theme::bg_color(name) }) }
 pub fn block_bg(name: &str) -> Option<gpui::Hsla> { style().palette("background", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::block_bg(name) } else { crate::theme::block_bg(name) }) }
-pub fn bg_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu() { crate::feishu_theme::bg_swatch(name) } else { crate::theme::bg_swatch(name) } }
 pub fn callout_bg(name: &str) -> Option<gpui::Hsla> { style().palette("callout", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_bg(name) } else { crate::theme::callout_bg(name) }) }
 pub fn callout_border(name: &str) -> Option<gpui::Hsla> { style().palette("border", hue(name)).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_border(name) } else { crate::theme::callout_border(name) }) }
 pub fn callout_border_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu() { crate::feishu_theme::callout_border_swatch(name) } else { crate::theme::callout_border_swatch(name) } }

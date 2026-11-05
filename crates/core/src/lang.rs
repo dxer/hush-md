@@ -44,6 +44,7 @@ pub const LANGS: &[(&str, &str, &[&str])] = &[
     ("MATLAB", "matlab", &[]),
     ("Makefile", "makefile", &["mak", "mk", "make"]),
     ("Markdown", "markdown", &["md"]),
+    ("Mermaid", "mermaid", &["mmd"]),
     ("Nginx", "nginx", &[]),
     ("Objective-C", "objectivec", &["oc", "objc", "mm"]),
     ("OpenGL Shading Language", "glsl", &[]),
@@ -152,5 +153,8 @@ mod tests {
         assert_eq!(resolve("type"), "TypeScript");
         assert_eq!(resolve("objective-c"), "Objective-C");
         assert_eq!(resolve("qqqq"), PLAIN);
+        // ```mermaid fences keep their language so the page can draw them.
+        assert_eq!(resolve("mermaid"), "Mermaid");
+        assert_eq!(resolve("mmd"), "Mermaid");
     }
 }

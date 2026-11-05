@@ -138,7 +138,7 @@ impl Workspace {
             w.doc_info = None;
             cx.notify();
         });
-        let modal = crate::trash::dialog("doc-info")
+        let modal = crate::dialogs::dialog("doc-info")
             .w(px(840.))
             .h(px(562.))
             .flex()
@@ -155,7 +155,7 @@ impl Workspace {
                     .border_b_1()
                     .border_color(Theme::line_divider())
                     .child(div().text_size(px(15.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).child(crate::settings::tr("文档信息", "Document information")))
-                    .child(crate::trash::close_button("doc-info-close").mr(px(3.)).on_click(close)),
+                    .child(crate::dialogs::close_button("doc-info-close").mr(px(3.)).on_click(close)),
             )
             .child(
                 div()
@@ -208,7 +208,7 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(crate::trash::scrim())
+                    .bg(crate::dialogs::scrim())
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|w, _, _, cx| {

@@ -16,6 +16,7 @@ pub mod keymap;
 mod link;
 pub mod links;
 pub mod math;
+mod mermaid;
 pub mod menus;
 mod overlays;
 mod numbering;

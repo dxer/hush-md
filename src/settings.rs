@@ -153,9 +153,9 @@ impl Page {
     }
 }
 
-/// The sidebar list, one evenly spaced run (six rows need no unlabelled
-/// groups); `None` is 回收站 (its own view, shown with this sidebar).
-const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), None, Some(Page::About)];
+/// The sidebar list, one evenly spaced run (five rows need no unlabelled
+/// groups).
+const NAV: [Page; 5] = [Page::General, Page::Appearance, Page::Shortcuts, Page::Library, Page::About];
 
 // ---- controls (switch on the accent, 30pt buttons, grouped rows)
 
@@ -479,17 +479,16 @@ impl Workspace {
 
     pub(crate) fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let current = (self.view == View::Settings).then_some(self.settings_page);
-        let in_trash = self.view == View::Trash;
-        let nav_row = |page: Option<Page>, cx: &mut Context<Self>| {
-            let on = if page.is_some() { page == current } else { in_trash };
-            let (title, icon) = page.map_or((tr("回收站", "Trash"), "bin"), |p| (p.title(), p.icon()));
+        let nav_row = |page: Page, cx: &mut Context<Self>| {
+            let on = Some(page) == current;
+            let (title, icon) = (page.title(), page.icon());
             div().id(SharedString::from(format!("settings-nav-{page:?}"))).h(px(sb::ROW_H)).flex().items_center().pl(px(6.)).pr(px(4.)).rounded(px(sb::ROW_R))
                 .text_size(px(13.)).line_height(px(20.)).cursor_pointer()
                 .when(on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
                 .when(!on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
                 .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().mr(px(9.)).child(ui::icon(icon, sb::ROW_ICON, if on { Theme::text_code() } else { Theme::icon() })))
                 .child(title)
-                .on_click(cx.listener(move |w, _, _, cx| match page { Some(p) => w.open_settings(p, cx), None => w.show_view(View::Trash, cx) }))
+                .on_click(cx.listener(move |w, _, _, cx| w.open_settings(page, cx)))
         };
         div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::UI_FONT)
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).title_bar().child(self.header_navigation(cx)))
@@ -631,7 +630,7 @@ impl Workspace {
                     button("reveal-library", reveal).on_click(|_, _, cx| cx.reveal_path(&crate::store::Store::root_dir()))).into_any_element(),
                 row(
                     tr("Markdown 文件", "Markdown files"),
-                    Some(tr("每篇笔记就是文件夹里的一个 .md 文件，可以用任何编辑器打开，也可以用 Git 同步。", "Every note is a .md file in the folder. Open it in any editor and sync it with Git.").into()),
+                    Some(tr("每篇笔记就是文件夹里的一个 .md 或 .markdown 文件，可以用任何编辑器打开，也可以用 Git 同步。", "Every note is a .md or .markdown file in the folder. Open it in any editor and sync it with Git.").into()),
                     div(),
                 ).into_any_element(),
             ]))
@@ -679,6 +678,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "设置" => "Settings",
         "新建" => "New",
         "新建文档" => "New document",
+        "新建文件夹" => "New folder",
         "搜索" => "Search",
         "搜索文档…" => "Search documents…",
         "搜索文档..." => "Search documents...",
@@ -688,17 +688,16 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "创建时间" => "Date created",
         "修改时间" => "Date modified",
         "文档名称" => "Document name",
+        "笔记标题" => "Note title",
         "名称" => "Name",
-        "回收站" => "Trash",
+        "文件夹名" => "Folder name",
         "存储管理" => "Storage",
         "更多" => "More",
         "返回" => "Back",
         "取消" => "Cancel",
         "确定" => "OK",
         "删除" => "Delete",
-        "移到回收站" => "Move to trash",
         "恢复" => "Restore",
-        "清空回收站" => "Empty trash",
         "永久删除" => "Delete permanently",
         "彻底删除" => "Delete permanently",
         "重命名" => "Rename",
@@ -894,23 +893,19 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "正在导出文档" => "Exporting document",
         "文档打印中" => "Printing document",
         "文件格式不支持" => "Unsupported file format",
+        "文件已在磁盘上更新，已重新载入" => "The file changed on disk and was reloaded",
         "导入失败，请检查文件格式" => "Import failed. Check the file format.",
         "导出 Markdown 设置" => "Export Markdown",
         "内容范围" => "Content",
         "仅文本（不含图片和附件）" => "Text only (no images or attachments)",
         "所有内容" => "All content",
-        "即将彻底删除" => "Deleting soon",
-        "回收站暂无内容" => "Trash is empty",
-        "位置" => "Location",
-        "剩余时间" => "Time remaining",
-        "恢复成功。部分文档由于原位置不存在，已恢复到“我的文档”" => "Restored. Some documents were moved to My documents because their original location no longer exists.",
-        "恢复成功" => "Restored successfully",
         "已彻底删除" => "Permanently deleted",
-        "删除的内容将进入回收站，30 天后自动彻底删除" => "Deleted items will be moved to Trash and permanently deleted after 30 days.",
-        "确认恢复？" => "Restore this document?",
-        "确认后将恢复至原位置" => "The document will be restored to its original location.",
-        "确认彻底删除？" => "Delete permanently?",
-        "彻底删除后，该页面及其子页面将无法恢复" => "This page and its child pages cannot be recovered after permanent deletion.",
+        "已移到回收站" => "Moved to Trash",
+        "文件会移到系统回收站，可在访达 / 资源管理器中恢复" => "The file will be moved to the system Trash; restore it from Finder or Explorer.",
+        "文件夹和其中的笔记会一起移到系统回收站，可在访达 / 资源管理器中恢复" => "The folder and its notes will be moved to the system Trash; restore them from Finder or Explorer.",
+        "是否彻底删除文件夹 {}？" => "Permanently delete the folder {}?",
+        "是否彻底删除所选的 {} 项？" => "Permanently delete the {} selected items?",
+        "该位置不支持回收站，删除后无法恢复" => "This location has no trash. Deleting is permanent.",
         "是否隐藏引用列表？" => "Hide references?",
         "选择隐藏后，协作者将无法查看本文的引用列表。如需重新显示，可点击文档右上角的更多按钮“...”，打开“显示引用列表”开关。" => "The reference list will be hidden. To show it again, open the document’s More menu and turn on Show references.",
         "隐藏" => "Hide",
@@ -1131,19 +1126,9 @@ fn diagnostic_for(message: &str, english: bool) -> String {
     if !english { return message.to_string(); }
     const TEMPLATES: &[(&str, &str)] = &[
         ("无法读取文档索引：{}", "Could not read document index: {}"),
-        ("无法读取回收站索引：{}", "Could not read Trash index: {}"),
         ("文档索引已损坏，已从备份恢复（原文件保留为 {}）", "Document index was damaged and restored from backup (original retained as {})."),
-        ("回收站索引已损坏，已从备份恢复（原文件保留为 {}）", "Trash index was damaged and restored from backup (original retained as {})."),
         ("文档索引已损坏且没有可用备份，部分文档的置顶、层级等信息已重置（原文件保留为 {}）", "Document index was damaged with no usable backup. Some pins and document hierarchy were reset (original retained as {})."),
-        ("回收站索引已损坏且没有可用备份，部分文档的置顶、层级等信息已重置（原文件保留为 {}）", "Trash index was damaged with no usable backup. Some metadata was reset (original retained as {})."),
-        ("回收站已存在同名文档，未覆盖：{}", "A document with this ID already exists in Trash and was not overwritten: {}"),
         ("文档库已存在同名文档，未覆盖：{}", "A document with this ID already exists in Documents and was not overwritten: {}"),
-        ("文档已移入回收站，文档索引清理失败：{}", "Document moved to Trash, but the document index could not be cleaned up: {}"),
-        ("回收站目录读取不完整：{}", "Could not fully read the Trash directory: {}"),
-        ("无法清理过期回收站文档 {}：{}", "Could not remove expired Trash document {}: {}"),
-        ("回收站索引保存失败：{}", "Could not save Trash index: {}"),
-        ("恢复文档 {} 失败，已恢复的文档保留在文档库", "Could not restore document {}. Documents already restored remain in Documents."),
-        ("文档已恢复，回收站索引清理失败：{}", "Document restored, but the Trash index could not be cleaned up: {}"),
     ];
     for (source, target) in TEMPLATES {
         let parts: Vec<_> = source.split("{}").collect();
@@ -1198,9 +1183,9 @@ mod localization_tests {
 
     #[test]
     fn diagnostics_preserve_paths_and_identifiers() {
-        let source = "无法清理过期回收站文档 我的笔记.xml：Permission denied";
+        let source = "无法读取文档索引：我的笔记.json";
         assert_eq!(diagnostic_for(source, false), source);
-        assert_eq!(diagnostic_for(source, true), "Could not remove expired Trash document 我的笔记.xml: Permission denied");
+        assert_eq!(diagnostic_for(source, true), "Could not read document index: 我的笔记.json");
         assert_eq!(diagnostic_for("文档索引已损坏，已从备份恢复（原文件保留为 index.json.bad）", true), "Document index was damaged and restored from backup (original retained as index.json.bad).");
         assert_eq!(diagnostic_for("unknown OS error", true), "unknown OS error");
     }

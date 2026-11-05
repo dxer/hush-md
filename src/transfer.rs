@@ -8,7 +8,7 @@ use crate::settings::display_title;
 use crate::model::{Block, BlockKind, Document, RichText};
 use crate::printing::{self, Job};
 use crate::theme::Theme;
-use crate::trash::{close_button, dialog, primary_button, scrim, secondary_button};
+use crate::dialogs::{close_button, dialog, primary_button, scrim, secondary_button};
 use crate::ui::ToastKind;
 use gpui::{prelude::FluentBuilder, *};
 use std::path::{Path, PathBuf};

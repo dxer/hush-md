@@ -7,7 +7,7 @@ use crate::app::Workspace;
 use crate::settings::display_title;
 use crate::store::Entry;
 use crate::theme::{self, Theme};
-use crate::trash::scrim;
+use crate::dialogs::scrim;
 use crate::ui::{ROW_RADIUS, format_visit, icon, ui_runs, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 use std::ops::Range;

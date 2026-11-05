@@ -10,7 +10,7 @@ AppId={{59DC98EE-A136-40C9-A7BD-EB0CC50E37C2}
 AppName=hush.md
 AppVersion={#AppVersion}
 AppPublisher=hush.md
-AppPublisherURL=https://github.com/s1dashu/hush-md
+AppPublisherURL=https://github.com/dxer/hush-md
 DefaultDirName={localappdata}\Programs\hush.md
 DisableDirPage=no
 DisableProgramGroupPage=yes
@@ -35,7 +35,7 @@ CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
 #ifdef Signed
-SignTool=quietmd
+SignTool=hushmd
 SignedUninstaller=yes
 SignedUninstallerDir={#AppSource}
 #endif

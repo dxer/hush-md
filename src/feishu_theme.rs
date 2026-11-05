@@ -96,7 +96,8 @@ pub fn shadow_panel() -> Vec<BoxShadow> {
     vec![shadow(0.1, 6., 24., 0.)]
 }
 
-/// Modal dialogs (0 8 24 4 at .12).
+/// Modal dialogs (0 8 24 4 at .12). Kept for parity with `theme::shadow_dialog`.
+#[allow(dead_code)]
 pub fn shadow_dialog() -> Vec<BoxShadow> {
     vec![shadow(0.12, 8., 24., 4.)]
 }
@@ -131,6 +132,7 @@ impl Theme {
     pub fn fill_hover() -> Hsla { rgbaf(31, 35, 41, 0.08) }
     pub fn fill_hover_strong() -> Hsla { rgbaf(31, 35, 41, 0.10) }
     pub fn fill_pressed() -> Hsla { rgbaf(31, 35, 41, 0.12) }
+    #[allow(dead_code)]
     pub fn fill_active() -> Hsla { rgbaf(20, 86, 240, 0.15) }
     pub fn fill_turninto_active() -> Hsla { c(ud::B100) }
     pub fn selection() -> Hsla { rgbaf(20, 86, 240, 0.18) }
@@ -207,13 +209,6 @@ pub fn callout_border_swatch(name: &str) -> Option<Hsla> {
 
 // ---- layout metrics (px)
 
-pub const SIDEBAR_WIDTH: f32 = 300.0;
-pub const SIDEBAR_MIN: f32 = 268.0;
-pub const SIDEBAR_MAX: f32 = 800.0;
-/// The editor keeps at least this much room when the sidebar is dragged wider.
-pub const SIDEBAR_MIN_CONTENT: f32 = 540.0;
-/// Left inset of the header controls that sit beside the macOS traffic lights.
-pub const TRAFFIC_LIGHTS_W: f32 = 92.0;
 
 /// (font size, line height, margin top, margin bottom) per block.
 pub struct BlockMetrics {
@@ -235,9 +230,9 @@ pub fn heading_metrics(level: u8) -> BlockMetrics {
     BlockMetrics { size, line_height: lh, mt, mb }
 }
 
-pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
 
-pub use crate::theme::{craft, ca, mix, shadow_button};
+#[allow(unused_imports)] // `shadow_button` is re-exported for `feishu_theme::shadow_button` callers
+pub use crate::theme::{craft, ca, shadow_button};
 
 impl Theme { pub fn link_hover() -> Hsla { c(ud::old::B600) } }
 
@@ -281,4 +276,3 @@ impl Theme { pub fn todo_box() -> Hsla { ca(craft::N1000, 0.22) } }
 
 impl Theme { pub fn code_text() -> Hsla { c(0x4c4d50) } }
 
-pub fn font_swatch(name: Option<&str>) -> Hsla { name.and_then(text_color).unwrap_or(Theme::text()) }

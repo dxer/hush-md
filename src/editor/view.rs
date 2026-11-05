@@ -948,6 +948,7 @@ impl Editor {
             header_rows: 0,
             header_col: false,
             rows: (0..rows).map(|_| (0..cols).map(|_| TableCell::empty()).collect()).collect(),
+            aligns: vec![],
         };
         let first = t.rows[0][0].blocks[0].id;
         let nid = self.core.insert_block(Block::new(BlockKind::Table(t), RichText::default()));
@@ -1662,6 +1663,9 @@ impl Editor {
         }
         if self.core.in_block_mode() {
             self.core.enter_from_block_sel();
+        } else if self.core.sel.is_collapsed() && self.core.cell_step(true) {
+            // In a table cell: Enter goes to the next cell (the last one adds
+            // a row); the cell keeps a single line, which Markdown can write.
         } else if self.core.is_code(self.core.sel.head.block) && self.core.sel.is_collapsed() {
             // Newline keeps the current line's indentation.
             let h = self.core.sel.head;
@@ -2667,7 +2671,14 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
     })
 }
 
-impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; self.menu = None; } }
+impl Editor {
+    pub(crate) fn refresh_theme(&mut self) {
+        self.items_key = None;
+        self.menu = None;
+        // Diagram rasters carry the old palette.
+        super::mermaid::clear();
+    }
+}
 
 impl Editor {
     /// Switch between the rendered page and the file's Markdown source.

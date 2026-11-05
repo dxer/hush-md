@@ -537,6 +537,16 @@ impl<'a> Parser<'a> {
         if i + 1 >= to { return None; }
         if !self.line(i).text.contains('|') || !is_table_delim(self.line(i + 1).text) { return None; }
         let cols = split_row(self.line(i + 1).text).len().max(1);
+        let aligns: Vec<Option<Align>> = split_row(self.line(i + 1).text).iter().take(cols).map(|d| {
+            let d = d.trim();
+            // A plain `---` keeps its spelling; `:---` records the explicit left.
+            match (d.starts_with(':'), d.ends_with(':')) {
+                (true, true) => Some(Align::Center),
+                (true, false) => Some(Align::Left),
+                (false, true) => Some(Align::Right),
+                (false, false) => None,
+            }
+        }).collect();
         let mut rows = vec![];
         let mut j = i;
         while j < to {
@@ -553,7 +563,7 @@ impl<'a> Parser<'a> {
             rows.push(row);
             j += 1;
         }
-        let mut t = Table { col_widths: vec![Table::DEFAULT_WIDTH; cols], header_rows: 1, header_col: false, rows };
+        let mut t = Table { col_widths: vec![Table::DEFAULT_WIDTH; cols], header_rows: 1, header_col: false, rows, aligns };
         t.repair();
         Some((Block::new(BlockKind::Table(t), RichText::default()), j))
     }
@@ -786,18 +796,37 @@ fn serialize_shallow(b: &Block, out: &mut String, depth: usize) {
         }
         BlockKind::Divider => out.push_str(&format!("{pad}---\n")),
         BlockKind::Table(t) => {
+            // A cell's blocks all go on its one Markdown line: joining their
+            // text with spaces keeps every word (a newline inside a cell
+            // would end the row).
+            let cell_md = |cell: &crate::model::TableCell| -> String {
+                cell.blocks
+                    .iter()
+                    .map(|b| inline_md(&b.text))
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .replace('\n', " ")
+                    .replace('|', "\\|")
+            };
             for (r, row) in t.rows.iter().enumerate() {
                 out.push_str(&pad);
                 out.push('|');
                 for cell in row {
-                    let text = cell.blocks.first().map(|b| inline_md(&b.text)).unwrap_or_default();
-                    out.push_str(&format!(" {} |", text.replace('|', "\\|")));
+                    out.push_str(&format!(" {} |", cell_md(cell)));
                 }
                 out.push('\n');
                 if r == 0 && t.header_rows > 0 {
                     out.push_str(&pad);
                     out.push('|');
-                    for _ in 0..t.ncols() { out.push_str(" --- |"); }
+                    for c in 0..t.ncols() {
+                        out.push_str(match t.aligns.get(c).copied().flatten() {
+                            None => " --- |",
+                            Some(Align::Left) => " :--- |",
+                            Some(Align::Center) => " :---: |",
+                            Some(Align::Right) => " ---: |",
+                        });
+                    }
                     out.push('\n');
                 }
             }
@@ -1109,6 +1138,11 @@ mod tests {
         for src in [
             "> quoted\n> more\n",
             "> a\n>\n> b\n",
+            "| a | b | c |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |\n",
+            "| a |\n| --- |\n",
+            // A diagram fence is ordinary code to the format: the source is
+            // what gets saved, never a rendering of it.
+            "```mermaid\nflowchart LR\n  A --> B\n```\n",
             "---\n",
             "***\n",
             "___\n",
@@ -1128,6 +1162,37 @@ mod tests {
         ] {
             assert_eq!(round_trip(src), src, "source: {src:?}");
         }
+    }
+
+    #[test]
+    fn table_cell_text_is_never_dropped() {
+        // Two paragraphs in one cell: Markdown has one line per cell, so the
+        // save joins them rather than keeping only the first.
+        let src = "| a |\n| --- |\n| 1 |\n";
+        let mut doc = read(src);
+        let BlockKind::Table(t) = &mut doc.blocks[0].kind else { panic!("no table") };
+        t.rows[1][0].blocks.push(Block::text("2"));
+        t.rows[1][0].blocks.push(Block::text("3"));
+        t.rows[1][0].blocks[0].text = RichText::plain("1");
+        // The edit kernel marks the containing block dirty; do the same so the
+        // writer does not hand back the source bytes.
+        doc.blocks[0].origin.as_mut().unwrap().dirty = true;
+        let out = write(&doc);
+        assert_eq!(out, "| a |\n| --- |\n| 1 2 3 |\n", "{out}");
+        let again = read(&out);
+        let BlockKind::Table(t) = &again.blocks[0].kind else { panic!("no table") };
+        assert_eq!(t.rows[1][0].blocks[0].text.text, "1 2 3");
+    }
+
+    #[test]
+    fn editing_a_table_keeps_column_alignment() {
+        let src = "| left | middle | right |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |\n";
+        let mut doc = read(src);
+        let BlockKind::Table(t) = &mut doc.blocks[0].kind else { panic!("no table") };
+        assert_eq!(t.aligns, vec![Some(Align::Left), Some(Align::Center), Some(Align::Right)]);
+        t.rows[1][0].blocks[0].text = RichText::plain("changed");
+        doc.blocks[0].origin.as_mut().unwrap().dirty = true;
+        assert_eq!(write(&doc), "| left | middle | right |\n| :--- | :---: | ---: |\n| changed | 2 | 3 |\n");
     }
 
     #[test]

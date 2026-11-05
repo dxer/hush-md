@@ -429,6 +429,10 @@ pub struct Table {
     /// A full rows × columns grid; slots hidden under a merged cell hold
     /// [`TableCell::covered`] (DocxXML simply omits them).
     pub rows: Vec<Vec<TableCell>>,
+    /// Per-column alignment, as written in a Markdown table's rule row:
+    /// `Some` for an explicit `:---` / `:---:` / `---:`, `None` for a plain
+    /// `---` (which is left-aligned too, but is written back as `---`).
+    pub aligns: Vec<Option<Align>>,
 }
 
 impl Table {
@@ -437,6 +441,11 @@ impl Table {
 
     pub fn ncols(&self) -> usize {
         self.col_widths.len()
+    }
+
+    /// Column `c`'s alignment; columns past the stored list are left-aligned.
+    pub fn align(&self, c: usize) -> Align {
+        self.aligns.get(c).copied().flatten().unwrap_or_default()
     }
 
     /// The visible cell whose span covers slot `(r, c)`.
@@ -501,6 +510,7 @@ impl Table {
             }
         }
         self.header_rows = self.header_rows.min(nrows);
+        self.aligns.resize(n, None);
     }
 
     /// Visible cells as `(top, left, rowspan, colspan, cell)`.
@@ -558,6 +568,7 @@ impl Table {
         });
         let cells = cells.collect();
         self.col_widths.insert(at, Self::DEFAULT_WIDTH);
+        self.aligns.insert(at.min(self.aligns.len()), None);
         self.put_cells(nrows, cells);
     }
 
@@ -591,6 +602,8 @@ impl Table {
         });
         let cells = cells.collect();
         self.col_widths.drain(a..b);
+        let (a, b) = (a.min(self.aligns.len()), b.min(self.aligns.len()));
+        self.aligns.drain(a..b);
         self.put_cells(nrows, cells);
     }
 
@@ -606,6 +619,9 @@ impl Table {
     pub fn move_cols(&mut self, range: std::ops::Range<usize>, to: usize) {
         let order = reordered(self.col_widths.len(), range, to);
         self.col_widths = order.iter().map(|&i| self.col_widths[i]).collect();
+        if order.len() == self.aligns.len() {
+            self.aligns = order.iter().map(|&i| self.aligns[i]).collect();
+        }
         for row in &mut self.rows {
             *row = permute(std::mem::take(row), &order);
         }
@@ -1125,11 +1141,26 @@ mod tests {
         let rows = (0..nr)
             .map(|r| (0..nc).map(|c| TableCell { blocks: vec![Block::text(&format!("{r}{c}"))], ..TableCell::empty() }).collect())
             .collect();
-        Table { col_widths: vec![100.; nc], header_rows: 0, header_col: false, rows }
+        Table { col_widths: vec![100.; nc], header_rows: 0, header_col: false, rows, aligns: vec![] }
     }
 
     fn text(t: &Table, r: usize, c: usize) -> String {
         t.rows[r][c].blocks.iter().map(|b| b.text.text.clone()).collect::<Vec<_>>().join("+")
+    }
+
+    #[test]
+    fn column_ops_move_alignment_with_the_columns() {
+        let mut t = grid(2, 3);
+        t.aligns = vec![Some(Align::Left), Some(Align::Center), Some(Align::Right)];
+        t.insert_col(1);
+        assert_eq!(t.aligns, vec![Some(Align::Left), None, Some(Align::Center), Some(Align::Right)]);
+        t.delete_cols(0..2);
+        assert_eq!(t.aligns, vec![Some(Align::Center), Some(Align::Right)]);
+        t.move_cols(1..2, 0);
+        assert_eq!(t.aligns, vec![Some(Align::Right), Some(Align::Center)]);
+        // `repair` keeps the list one entry per column.
+        t.repair();
+        assert_eq!(t.aligns.len(), t.ncols());
     }
 
     #[test]

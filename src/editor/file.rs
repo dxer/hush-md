@@ -277,7 +277,7 @@ pub fn quick_look(p: &Path) {
     });
 }
 
-/// A new attachment for `p`, copied into `assets/files/<uuid>/<name>`.
+/// A new attachment for `p`, copied into `.hush/assets/files/<uuid>/<name>`.
 fn file_block_from_path(p: &Path) -> Option<Block> {
     let name = p.file_name()?.to_string_lossy().to_string();
     let size = std::fs::metadata(p).ok().filter(|m| m.is_file())?.len();

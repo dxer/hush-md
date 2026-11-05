@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn exports_tables() {
         let cell = |s: &str| TableCell { blocks: vec![Block::text(s)], ..TableCell::empty() };
-        let t = Table { col_widths: vec![], header_rows: 1, header_col: false, rows: vec![vec![cell("a"), cell("b|c")], vec![cell("1")]] };
+        let t = Table { col_widths: vec![], header_rows: 1, header_col: false, rows: vec![vec![cell("a"), cell("b|c")], vec![cell("1")]], aligns: vec![] };
         assert_eq!(table(&t), "| a | b\\|c |\n| --- | --- |\n| 1 |  |");
     }
 }

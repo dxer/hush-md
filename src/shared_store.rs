@@ -26,10 +26,9 @@ impl SharedStore {
     pub fn create_in(&mut self, folder: &str) -> Result<(String, Document)> { self.0.borrow_mut().create_in(folder) }
     pub fn create_from(&mut self, doc: &Document) -> Result<String> { self.0.borrow_mut().create_from(doc) }
     pub fn size_of(&self, id: &str, doc: &Document) -> u64 { self.0.borrow_mut().size_of(id, doc) }
-    pub fn delete(&mut self, id: &str, root: Option<&str>) -> Result<()> { self.0.borrow_mut().delete(id, root) }
-    pub fn list_trash(&mut self) -> Vec<TrashEntry> { self.0.borrow_mut().list_trash() }
-    pub fn restore(&mut self, id: &str) -> Result<bool> { self.0.borrow_mut().restore(id) }
-    pub fn purge(&mut self, id: &str) -> Result<()> { self.0.borrow_mut().purge(id) }
+    pub fn delete(&mut self, id: &str) -> Result<()> { self.0.borrow_mut().delete(id) }
+    pub fn delete_permanently(&mut self, id: &str) -> Result<()> { self.0.borrow_mut().delete_permanently(id) }
+    pub fn delete_folder_permanently(&mut self, rel: &str) -> Result<()> { self.0.borrow_mut().delete_folder_permanently(rel) }
     pub fn import(&mut self, path: &std::path::Path) -> Result<String> { self.0.borrow_mut().import(path) }
     pub fn set_width(&mut self, id: &str, width: PageWidth) -> Result<()> { self.0.borrow_mut().set_width(id, width) }
     pub fn update_meta(&mut self, id: &str, f: impl FnOnce(&mut Meta)) -> Result<()> { self.0.borrow_mut().update_meta(id, f) }

@@ -8,7 +8,7 @@ use crate::editor::view::SubPage;
 use crate::input::{TextField, TextFieldEvent};
 use crate::store::Entry;
 use crate::theme::{self, Theme, craft};
-use crate::trash::{close_button, dialog, primary_button, scrim, secondary_button};
+use crate::dialogs::{close_button, dialog, primary_button, scrim, secondary_button};
 use crate::ui::{ROW_RADIUS, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 use std::collections::{HashMap, HashSet};
@@ -50,7 +50,7 @@ impl<'a> Tree<'a> {
             fs.entry(f.parent.clone()).or_default().push((f.name.clone(), f.path.clone()));
         }
         for v in fs.values_mut() {
-            v.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+            v.sort_by_key(|a| a.0.to_lowercase());
         }
         // The 移动到 dialog and breadcrumbs still work on note-parent links;
         // this keeps their shape until they are rewritten for folders.
@@ -157,7 +157,7 @@ impl Workspace {
     /// notes in the folder that shares its name.
     pub(crate) fn sync_sub_pages(&mut self, cx: &mut Context<Self>) {
         let (Some(id), Some(ed)) = (self.current.clone(), self.editor.clone()) else { return };
-        let stem = id.trim_end_matches(".md").trim_end_matches(".markdown").to_string();
+        let stem = hush_core::vault::path_stem_of(&id);
         let pages = self
             .entries
             .iter()

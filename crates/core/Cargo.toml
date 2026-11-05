@@ -20,6 +20,9 @@ uuid = { version = "1.28.0", features = ["v4"] }
 rustc-hash = "2.1"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3"
+# Deleting a note moves it to the system trash, so it can be recovered
+# outside the app.
+trash = "5.2"
 
 [lints]
 workspace = true

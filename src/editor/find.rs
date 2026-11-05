@@ -50,17 +50,15 @@ const BTN_W: f32 = 80.;
 impl Editor {
     pub fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         // In the source view, 查找 searches the file's text itself.
-        if self.source {
-            if let Some(ed) = &self.src_editor {
-                self.find_field.update(cx, |f, cx| f.set_text("", cx));
-                self.find = Some(Find { replace, matches: vec![], current: None });
-                let q = self.find_field.read(cx).text.clone();
-                ed.update(cx, |e, cx| e.find(&q, cx));
-                let field = self.find_field.clone();
-                window.focus(&field.focus_handle(cx));
-                cx.notify();
-                return;
-            }
+        if self.source && let Some(ed) = &self.src_editor {
+            self.find_field.update(cx, |f, cx| f.set_text("", cx));
+            self.find = Some(Find { replace, matches: vec![], current: None });
+            let q = self.find_field.read(cx).text.clone();
+            ed.update(cx, |e, cx| e.find(&q, cx));
+            let field = self.find_field.clone();
+            window.focus(&field.focus_handle(cx));
+            cx.notify();
+            return;
         }
         // Seed the query with a single-line selection, like the browser find bar.
         let (a, b) = self.core.ordered();

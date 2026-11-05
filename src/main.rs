@@ -26,15 +26,12 @@ mod sidebar;
 mod settings;
 mod themes;
 mod shortcuts;
-#[allow(dead_code, unused_imports)]
 mod feishu_theme;
-#[allow(dead_code, unused_imports)]
 mod editor_theme;
-#[allow(dead_code, unused_imports)]
 mod editor_ui;
 mod theme;
 mod transfer;
-mod trash;
+mod dialogs;
 mod tree;
 mod ui;
 

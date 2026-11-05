@@ -479,7 +479,7 @@ fn parse_table(e: &Element) -> Table {
             }
         }
     }
-    let mut t = Table { col_widths, header_rows, header_col, rows };
+    let mut t = Table { col_widths, header_rows, header_col, rows, aligns: vec![] };
     t.repair();
     t
 }

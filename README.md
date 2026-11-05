@@ -17,6 +17,7 @@ hush.md 打开一个普通文件夹，把里面的 Markdown 文件当作笔记�
 ## 功能
 
 - **Markdown**：标题（ATX 与 setext）、段落、有序 / 无序 / 待办列表（可嵌套）、引用、代码块（语法高亮）、分割线、HTML 块、管道表格、图片、链接、自动链接、行内代码、加粗 / 斜体 / 删除线。
+- **图表**：```` ```mermaid ```` 围栏直接在页面里画成图（流程图、时序图、类图、状态图、ER、甘特、饼图等 23 种），纯 Rust 渲染，不需要 Node.js 或浏览器。
 - **编辑**：渲染视图里直接输入，`#`、`-`、`[]`、`>` 等快捷输入和 `/` 斜杠菜单；源码视图里编辑原文。撤销 / 重做、查找替换、块选择、拖动排序。
 - **整理**：文件夹树、置顶、收藏、全文搜索、主页。
 - **主题**：内置 Craft、飞书、Notion、Obsidian 四套风格，也可以用 CSS 自己写，见 [docs/THEMES.md](docs/THEMES.md)。
@@ -26,7 +27,7 @@ hush.md 打开一个普通文件夹，把里面的 Markdown 文件当作笔记�
 
 默认是 `~/Documents/Hush.md`，可以用环境变量 `HUSH_MD_HOME` 指向任何文件夹。也可以直接把已有的 Markdown 文件夹当作笔记库打开。
 
-保存是原子的：先写临时文件再改名，崩溃不会留下写了一半的笔记。除了你自己的 `.md`，应用只会在文件夹里创建 `.hush/`（界面设置和每篇笔记的页宽、阅读模式等偏好）。
+保存是原子的：先写临时文件再改名，崩溃不会留下写了一半的笔记。除了你自己的 `.md` / `.markdown`，应用只会在文件夹里创建 `.hush/`（界面设置、每篇笔记的偏好、图片和附件、主题副本）。删除会移到系统回收站，而不是应用内的回收站。
 
 ## 从源码构建
 
@@ -42,8 +43,10 @@ HUSH_MD_HOME=/tmp/notes ./target/release/hush_md   # 指向别的文件夹
 
 ## 与其他编辑器的关系
 
-hush.md 的界面、文档模型和编辑内核来自 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT），但存储和格式完全不同：quiet.md 用飞书 DocxXML 和一个带索引的文档库，hush.md 直接读写 Markdown 文件。两者各自独立演进。
+hush.md 起步时借鉴了 [quiet.md](https://github.com/s1dashu/quiet-md)（MIT，作者 s1dashu）：界面、块模型和编辑内核来自那里，再改造成 Markdown 优先的编辑器。这个项目不是 quiet.md 的分支，也不跟踪它的更新，两者各自独立演进。
+
+存储和格式是完全重写的：quiet.md 用飞书 DocxXML 和一个带索引的文档库，hush.md 直接读写你文件夹里的 Markdown 文件，没有索引，删除走系统回收站。`docxml.rs` 留在这里只用于和飞书互通。
 
 ## 许可
 
-代码使用 [MIT](LICENSE)。原 quiet.md 的版权归其作者；第三方代码、字体和素材见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+代码使用 [MIT](LICENSE)。quiet.md 的版权归 s1dashu；第三方代码、字体和素材见 [THIRD_PARTY.md](THIRD_PARTY.md)。
