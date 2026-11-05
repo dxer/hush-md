@@ -1,12 +1,14 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #define AppVersion "0.1.0"
 #endif
 #ifndef AppSource
   #define AppSource "..\..\target\release"
 #endif
 
 [Setup]
-AppId={{59DC98EE-A136-40C9-A7BD-EB0CC50E37C2}
+; A fresh AppID: inheriting quiet.md's would make Inno treat this as an
+; upgrade of that product and overwrite it on a machine that has both.
+AppId={{DD76EB38-E593-4539-833A-51A4DFFBAE20}
 AppName=hush.md
 AppVersion={#AppVersion}
 AppPublisher=hush.md
@@ -41,13 +43,15 @@ SignedUninstallerDir={#AppSource}
 #endif
 
 [Registry]
-; 用 hush.md 打开 .md / .markdown (double-click, "Open with").
-Root: HKA; Subkey: "Software\Classes\hush.md"; Flags: uninsdeletekey; Tasks: associate
-Root: HKA; Subkey: "Software\Classes\hush.md"; ValueType: string; ValueName: ""; ValueData: "Markdown document"; Tasks: associate
-Root: HKA; Subkey: "Software\Classes\hush.md\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\hush_md.exe,0"; Tasks: associate
-Root: HKA; Subkey: "Software\Classes\hush.md\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "\"{app}\hush_md.exe\" \"%1\""; Tasks: associate
-Root: HKA; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Tasks: associate
-Root: HKA; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Tasks: associate
+; 用 hush.md 打开 .md / .markdown（"打开方式"里的候选项）。
+; HKCU 因为 PrivilegesRequired=lowest；Windows 10+ 不允许程序改默认
+; 关联，用户第一次选 hush.md 时勾"始终使用"即可。
+Root: HKCU; Subkey: "Software\Classes\hush.md"; Flags: uninsdeletekey; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\hush.md"; ValueType: string; ValueName: ""; ValueData: "Markdown document"; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\hush.md\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\hush_md.exe,0"; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\hush.md\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\hush_md.exe"" ""%1"""; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: string; ValueName: "hush.md"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

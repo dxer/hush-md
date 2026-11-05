@@ -15,12 +15,25 @@
 #   BUNDLE_ID      bundle identifier，默认 com.dxer.hushmd（发布前改成你自己的反向域名）
 #   PACKAGE_UNSIGNED=1  没有证书时也继续：产出未签名、未公证的 dmg（CI 用）。
 #                  用户第一次打开要右键「打开」，正式发布不要这样发。
+#
+# 签名身份只从钥匙串读，脚本里不写死任何证书：同一台机器上如果还装着
+# 别的项目的证书，自动选择可能挑到别人的。所以选中的身份会打印出来，
+# 想指定就设 CODESIGN_ID（`security find-identity -v -p codesigning` 列出的全名）。
 set -e
 cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
 bundle_id=${BUNDLE_ID:-com.dxer.hushmd}
 profile=${NOTARY_PROFILE:-hush-md}
-sign_id=${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1 || true)}
+if [ -n "${CODESIGN_ID:-}" ]; then
+  sign_id=$CODESIGN_ID
+  echo "== 使用指定的签名身份：$sign_id"
+else
+  sign_id=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1 || true)
+  if [ -n "$sign_id" ]; then
+    echo "== 自动选中的签名身份：$sign_id"
+    echo "   （要换一个：CODESIGN_ID=\"Developer ID Application: 名字 (TEAMID)\" scripts/package.sh）"
+  fi
+fi
 if [ -z "$sign_id" ]; then
   [ -n "${PACKAGE_UNSIGNED:-}" ] || {
     echo "package.sh: 钥匙串里没有 Developer ID Application 证书。" >&2
@@ -102,6 +115,7 @@ if [ -n "$sign_id" ]; then
   echo "== 验收"
   spctl -a -vvv -t install "$dmg" || true
   codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags"
+  echo "== 签名身份：$sign_id"
 else
   echo "== 跳过签名与公证（未签名构建，只用于测试）"
 fi

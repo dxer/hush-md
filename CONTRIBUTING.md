@@ -43,7 +43,17 @@ FDL_FUZZ_SEEDS=2000 cargo test --release random_edits   # 更多随机编辑，�
 
 发布前需完成 `scripts/check.sh`，并确认对应提交的 CI 通过。
 
-发布二进制在 `[profile.release]` 里 `strip = "symbols"`：符号表原本占 12 MB，去掉后安装包小很多。不要把 `panic` 改成 `abort`——`src/editor/math.rs` 靠 `catch_unwind` 从 katex 的 panic 里恢复。`vendor/gpui/Cargo.toml` 的 `image` 依赖也关掉了默认特性（见 `vendor/PATCHES.md` 第 15 条），剩下的几种格式够用。现有的 `scripts/package.sh` / `scripts/release.sh` 和 `packaging/` 是从 quiet.md 带过来的 macOS / Windows 打包脚本；应用名、bundle id 和安装包文件名已换成 hush.md（`com.dxer.hushmd`、`packaging/windows/hush-md.iss`），但证书、公证和下载地址仍指向 quiet.md，正式发布前需要替换。
+发布二进制在 `[profile.release]` 里 `strip = "symbols"`：符号表原本占 12 MB，去掉后安装包小很多。不要把 `panic` 改成 `abort`——`src/editor/math.rs` 靠 `catch_unwind` 从 katex 的 panic 里恢复。`vendor/gpui/Cargo.toml` 的 `image` 依赖也关掉了默认特性（见 `vendor/PATCHES.md` 第 15 条），剩下的几种格式够用。
+
+`scripts/package.sh` / `scripts/release.sh` 和 `packaging/` 源自 quiet.md，但标识已经全部换成 hush.md：Bundle ID `com.dxer.hushmd`、安装器 `packaging/windows/hush-md.iss`、Windows 安装器的 `AppId` 是新生成的 GUID（沿用 quiet.md 的会被当成同一产品升级，覆盖掉已装的 quiet.md）。
+
+**签名身份不在脚本里写死**，只从钥匙串读：
+
+- macOS：`scripts/package.sh` 自动取钥匙串里第一个 "Developer ID Application"，**并把选中的全名打印出来**。机器上装着多个项目的证书时，用 `CODESIGN_ID="Developer ID Application: 名字 (TEAMID)"` 指定。
+- 公证：`NOTARY_PROFILE` 指向 `xcrun notarytool store-credentials` 建好的 profile。
+- Windows：`scripts/package-windows.ps1 -CertificateThumbprint <40 位指纹>`；不传就是未签名构建。
+
+上一版本还写着「证书和下载地址指向 quiet.md」，那句已经不成立了——证书取决于你机器上的钥匙串，下载地址在 Release 里。CI 没有任何证书，产物是未签名的。
 
 **CI 的构建产物。** 每次 push 到 `main`（以及手动 `workflow_dispatch`），两个 job 都会把安装包传到这次运行的 Artifacts 里，保留 30 天：
 

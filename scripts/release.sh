@@ -47,8 +47,12 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 plutil -lint "$app/Contents/Info.plist"
+# Which keychain identity signs is never hardcoded; print it so a machine
+# holding several projects' certificates can be checked afterwards.
+echo "Signing as: $SIGNING_IDENTITY"
 codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
+codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags" || true
 ditto -c -k --keepParent "$app" "$out/notarization.zip"
 xcrun notarytool submit "$out/notarization.zip" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json > "$out/notarization.json"
 python3 - "$out/notarization.json" <<'PYTHON'
