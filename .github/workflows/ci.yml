@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -21,6 +22,12 @@ jobs:
     timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
+      # sccache hashes each compilation unit's inputs, so the vendored path
+      # dependencies (gpui, taffy, async-tar) stop recompiling just because a
+      # fresh checkout gave them a new mtime. The target/ cache below cannot
+      # do that.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -28,6 +35,8 @@ jobs:
       # installs both here, so local and CI use the same compiler.
       - name: Install toolchain
         run: rustup component add clippy
+
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -60,8 +69,13 @@ jobs:
     name: Windows x64 build
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -92,8 +106,8 @@ jobs:
           if (!$iscc) { throw 'ISCC.exe was not found; Inno Setup is missing from the runner image' }
           # -File instead of & ./script.ps1: the runner's execution policy is
           # not ours to change, and the developer environment set above is
-          # inherited by the child process.
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1 -Iscc "$($iscc.FullName)"
+          # inherited by the child process. -SkipBuild: the step above just did it.
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1 -Iscc "$($iscc.FullName)" -SkipBuild
           if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
 
       - name: Upload Windows build
@@ -105,3 +119,33 @@ jobs:
             dist/windows/unsigned/*.sha256
           if-no-files-found: error
           retention-days: 30
+
+  # Pushing a v* tag publishes the two installers the jobs above built.
+  # Assets come from this run's artifacts, so the tag matched the commit
+  # that was actually compiled.
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, windows-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: hush-md-*
+          merge-multiple: true
+
+      - name: List assets
+        run: find dist -type f -printf '%p %s bytes\n'
+
+      - name: Create the release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true

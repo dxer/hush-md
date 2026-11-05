@@ -2,7 +2,10 @@ param(
     [string]$Iscc = 'ISCC.exe',
     [string]$CertificateThumbprint,
     [string]$TimestampUrl = 'http://time.certum.pl',
-    [string]$SignTool = 'signtool.exe'
+    [string]$SignTool = 'signtool.exe',
+    # CI builds once and then calls this with -SkipBuild; a local run without
+    # the flag compiles what it packages, which is what you want by hand.
+    [switch]$SkipBuild
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -27,8 +30,10 @@ $output = Join-Path $root "dist/windows/$mode"
 $stage = Join-Path $output ([guid]::NewGuid().ToString('N'))
 Push-Location $root
 try {
-    & cargo build --release --locked
-    if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+    if (!$SkipBuild) {
+        & cargo build --release --locked
+        if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+    }
     $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
     New-Item -ItemType Directory -Force $stage | Out-Null
     Copy-Item target/release/hush_md.exe $stage -Force
