@@ -16,6 +16,8 @@ impl SharedStore {
     /// One note, without scanning the whole folder (single-file windows).
     pub fn entry_at(&mut self, id: &str) -> Option<Entry> { self.0.borrow_mut().entry_at(id) }
     pub fn folders(&self) -> Vec<hush_core::vault::Folder> { self.0.borrow().folders() }
+    /// The notes in one folder, by name (one `read_dir`; contents unread).
+    pub fn siblings(&self, folder: Option<&str>) -> Vec<(String, String)> { self.0.borrow().siblings(folder) }
     pub fn resolve(&self, rel: &str) -> Result<std::path::PathBuf> { self.0.borrow().resolve(rel) }
     pub fn move_to_folder(&mut self, id: &str, folder: &str) -> Result<String> { self.0.borrow_mut().move_to_folder(id, folder) }
     pub fn create_folder(&self, parent: &str, name: &str) -> Result<String> { self.0.borrow().create_folder(parent, name) }

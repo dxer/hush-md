@@ -7,6 +7,7 @@ use crate::settings::display_title;
 use crate::store::Entry;
 use crate::theme::{self, Theme, craft};
 use crate::input::{TextField, TextFieldEvent};
+use std::rc::Rc;
 
 /// What follows the pointer while a note is dragged in the sidebar.
 struct DragPreview {
@@ -312,7 +313,12 @@ impl Workspace {
     /// 9px over the note's margin). Borderless like the sidebar: only the
     /// cursor changes, and a faint line shows while dragging.
     pub(crate) fn render_resize_handle(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let w = self.sidebar_w(window);
+        self.resize_handle(self.sidebar_w(window), cx)
+    }
+
+    /// The same handle for a window that draws its own sidebar (the file
+    /// window's outline).
+    pub(crate) fn resize_handle(&self, w: f32, cx: &mut Context<Self>) -> AnyElement {
         let dragging = self.sidebar_drag;
         div()
             .id("sidebar-resize")
@@ -1118,5 +1124,199 @@ impl Workspace {
             self.row_sub_bounds.set(None);
         }
         out
+    }
+}
+
+/// The file window's pages, at the bottom of its sidebar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FilePage {
+    /// The note's own headings (the page catalogue, out of the page).
+    #[default]
+    Outline,
+    /// The other `.md` files in the note's folder.
+    Files,
+}
+
+impl FilePage {
+    fn id(self) -> &'static str { if self == FilePage::Outline { "file-tab-outline" } else { "file-tab-files" } }
+    fn glyph(self) -> &'static str { if self == FilePage::Outline { "list" } else { "folder" } }
+}
+
+impl Workspace {
+    /// The file window's sidebar: the note's outline or the notes beside it,
+    /// and a two-tab footer. `None` while it is hidden.
+    pub(crate) fn render_file_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let w = self.sidebar_w(window);
+        // The list gets the window minus the header, the page's title row
+        // and the tab row, so a long outline scrolls instead of running
+        // under the tabs.
+        let height = (f32::from(window.viewport_size().height) - crate::app::HEADER_H - SECTION_H - 47.).max(80.);
+        let page = self.file_page;
+        let body = match page {
+            FilePage::Outline => match self.editor.clone() {
+                // Rows start 6pt in from the pane, like every other list here.
+                Some(ed) => ed.update(cx, |e, cx| e.outline_panel(w - SB_X * 2. + 6., height, window, cx)),
+                None => div().into_any_element(),
+            },
+            FilePage::Files => self.file_list(cx),
+        };
+        let head = match page {
+            FilePage::Outline => crate::settings::text("大纲").to_string(),
+            FilePage::Files => crate::settings::text("文件").to_string(),
+        };
+        div()
+            .id("file-sidebar")
+            .w(px(w))
+            .flex_none()
+            .h_full()
+            .flex()
+            .flex_col()
+            .text_color(Theme::text())
+            .font_family(theme::UI_FONT)
+            .child(
+                div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).pr(px(12.)).title_bar()
+                    .child(div().id("file-collapse").no_drag().ml(px(4.)).size(px(28.)).flex().items_center().justify_center().rounded(px(8.)).cursor_pointer()
+                        .hover(|s| s.bg(Theme::sidebar_hover()))
+                        .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                        .child(icon("panel-left-close", 17., Theme::icon()))
+                        .on_click(cx.listener(|ws, _, _, cx| { ws.sidebar_open = false; cx.notify(); }))),
+            )
+            .child(
+                div().flex_none().h(px(SECTION_H)).pl(px(SB_X + 10.)).flex().items_center()
+                    .child(div().min_w_0().text_size(px(13.)).line_height(px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section())
+                        .overflow_hidden().whitespace_nowrap().text_ellipsis().child(head)),
+            )
+            .child(div().flex_1().min_h_0().px(px(SB_X)).child(body))
+            .child(
+                div().flex_none().flex().flex_col()
+                    .child(footer_line())
+                    .child(div().pt(px(6.)).pb(px(10.)).px(px(SB_X)).flex().gap(px(2.))
+                        .child(self.file_tab(FilePage::Outline, crate::settings::text("大纲"), cx))
+                        .child(self.file_tab(FilePage::Files, crate::settings::text("文件"), cx))
+                        .child(
+                            // An icon, not a third tab: 设置 is not a page of the note.
+                            div().id("file-tab-settings").flex_none().w(px(36.)).h(px(ROW_H)).flex().items_center().justify_center()
+                                .rounded(px(8.)).cursor_pointer().hover(|s| s.bg(Theme::sidebar_hover()))
+                                .tip(crate::settings::tr("设置", "Settings"), None)
+                                .child(icon("settings-gear", 17., Theme::icon()))
+                                .on_click(cx.listener(|w, _, _, cx| w.open_settings(crate::settings::Page::General, cx))),
+                        )),
+            )
+            .into_any_element()
+    }
+
+    /// A tab: the footer row's metrics, filling half the sidebar. Clicking the
+    /// page already shown hides the sidebar, the way Typora's does.
+    fn file_tab(&self, page: FilePage, label: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.file_page == page;
+        div()
+            .id(page.id())
+            .flex_1()
+            .min_w_0()
+            .h(px(ROW_H))
+            .pl(px(6.))
+            .pr(px(4.))
+            .flex()
+            .items_center()
+            .rounded(px(ROW_R))
+            .cursor_pointer()
+            .text_size(px(13.))
+            .line_height(px(20.))
+            .when(on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
+            .when(!on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
+            .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().mr(px(9.))
+                .child(icon(page.glyph(), ROW_ICON, if on { Theme::text_code() } else { Theme::icon() })))
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+            .on_click(cx.listener(move |ws, _, _, cx| {
+                if ws.file_page == page {
+                    ws.sidebar_open = false;
+                } else {
+                    ws.file_page = page;
+                    ws.load_siblings(cx);
+                }
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// The 文件 page: the notes sitting in the open note's folder, the open
+    /// one marked. One `read_dir` — never the contents.
+    fn file_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self.current.clone();
+        let rows: Vec<(String, String)> = self.siblings.clone();
+        let rows = Rc::new(rows);
+        let n = rows.len();
+        let empty = div().px(px(6.)).py(px(8.)).text_size(px(13.)).line_height(px(20.)).text_color(Theme::text_placeholder())
+            .child(crate::settings::tr("这个文件夹里没有其他笔记", "No other notes in this folder"));
+        if n == 0 {
+            return empty.into_any_element();
+        }
+        let entity = cx.entity();
+        let list = uniform_list("file-list", n, move |range, _, _| {
+            range
+                .map(|ix| {
+                    let (id, name) = rows[ix].clone();
+                    let on = current.as_deref() == Some(id.as_str());
+                    let ent = entity.clone();
+                    let target = id.clone();
+                    div()
+                        .id(("file-row", ix))
+                        .w_full()
+                        .h(px(DOC_ROW_H))
+                        .pl(px(9.))
+                        .pr(px(6.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(ROW_R))
+                        .cursor_pointer()
+                        .text_size(px(13.))
+                        .line_height(px(DOC_ROW_H))
+                        .when(on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
+                        .when(!on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
+                        .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(name)))
+                        .on_click(move |_, window, cx| ent.update(cx, |ws, cx| ws.open_sibling(target.clone(), window, cx)))
+                })
+                .collect()
+        })
+.track_scroll(self.file_scroll.clone())
+        .w_full()
+        .h_full();
+        div().w_full().h_full().child(list).into_any_element()
+    }
+
+    /// The folder the open note lives in, and its name for the page header.
+    pub(crate) fn sibling_dir(&self) -> Option<String> {
+        self.current.as_deref().and_then(crate::tree::folder_of)
+    }
+
+    /// Scan the note's folder once, the first time 文件 is opened (and again
+    /// after a file is added or the window switches notes).
+    pub(crate) fn load_siblings(&mut self, _cx: &mut Context<Self>) {
+        if !self.siblings_stale {
+            return;
+        }
+        self.siblings_stale = false;
+        let dir = self.sibling_dir();
+        // One `read_dir`, off the UI thread: a folder of thousands of notes
+        // must not delay the frame that opened the page.
+        // Scanned on the UI thread: one `read_dir` with a stat per entry, so
+        // a folder of thousands still returns in a millisecond, and the store
+        // stays on the thread that owns it.
+        self.siblings = self.store.siblings(dir.as_deref());
+    }
+
+    /// Open another note from 文件: save first, then swap the window's note.
+    /// `save_before` only *defers* when the save failed (it runs the held
+    /// action after 重试), so the switch is ours to make when it returns true.
+    fn open_sibling(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.current.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        // Switching note leaves the 文件 list pointing at the old folder.
+        self.siblings_stale = true;
+        let target = id.clone();
+        if self.save_before(cx, move |w, window, cx| w.open(&target, window, cx)) {
+            self.open(&id, window, cx);
+        }
     }
 }

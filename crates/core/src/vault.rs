@@ -297,6 +297,33 @@ impl Vault {
         out
     }
 
+    /// The notes directly inside `folder` (`None` = the vault root), as
+    /// (vault-relative path, name without the extension), sorted by name.
+    ///
+    /// One `read_dir`, one `stat` per entry: no recursion and no file is
+    /// opened. A file window's 文件 page lists a folder of any size this way,
+    /// which is what keeps opening one note out of a ten-thousand-file scan.
+    pub fn siblings(&self, folder: Option<&str>) -> Vec<(String, String)> {
+        let dir = match folder {
+            None => self.root.clone(),
+            Some(f) => self.root.join(f),
+        };
+        let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
+        let mut out: Vec<(String, String)> = rd
+            .flatten()
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && is_note_path(p))
+            .filter_map(|p| {
+                let rel = p.strip_prefix(&self.root).ok()?.to_string_lossy().replace('\\', "/");
+                let name = stem_of(&rel);
+                Some((rel, name))
+            })
+            .collect();
+        out.sort_by_key(|(_, name)| name.to_lowercase());
+        out
+    }
+
     fn walk(&mut self, dir: &Path, out: &mut Vec<Note>) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten() {

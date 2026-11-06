@@ -272,6 +272,13 @@ pub struct Workspace {
     pub expanded: HashSet<String>,
     /// The vault's folders (vault-relative paths), refreshed with the notes.
     pub folders: Vec<crate::vault::Folder>,
+    /// The file window's sidebar page (a library window never shows it).
+    pub file_page: crate::sidebar::FilePage,
+    /// The notes beside the open one (the 文件 page), and whether they need
+    /// rescanning: the first time the page opens, after opening another note.
+    pub siblings: Vec<(String, String)>,
+    pub siblings_stale: bool,
+    pub file_scroll: UniformListScrollHandle,
     pub move_dlg: Option<crate::tree::MoveDialog>,
     /// 编辑 / 阅读 dropdown, and the mode button's last-frame bounds.
     pub mode_menu: bool,
@@ -325,6 +332,8 @@ impl Workspace {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let mut ws = Self::build_window_seeded(false, Some(name), false, window, cx);
         ws.single_file = true;
+        // The page first, Typora style: ⌘] (or the bar's button) brings the
+        // outline in.
         ws.sidebar_open = false;
         ws
     }
@@ -372,6 +381,12 @@ impl Workspace {
                     // would stall on a big folder for no visible gain.
                     if this.single_file {
                         this.refresh_single_entry();
+                        // Files may have been added or removed beside this
+                        // one while the window was in the background.
+                        this.siblings_stale = true;
+                        if this.sidebar_open && this.file_page == crate::sidebar::FilePage::Files {
+                            this.load_siblings(cx);
+                        }
                     } else {
                         this.entries = this.store.list();
                         this.folders = this.store.folders();
@@ -445,6 +460,10 @@ impl Workspace {
             store,
             entries,
             folders,
+            file_page: Default::default(),
+            siblings: vec![],
+            siblings_stale: true,
+            file_scroll: UniformListScrollHandle::new(),
             current: None,
             editor: None,
             search,
@@ -570,6 +589,7 @@ impl Workspace {
         // The window shows one file, so only that one is listed.
         self.entries = self.store.entry_at(&name).into_iter().collect();
         self.folders.clear();
+        self.siblings_stale = true;
         self.sort();
         if self.entries.iter().any(|e| e.id == name) {
             self.current = None;
@@ -640,10 +660,13 @@ impl Workspace {
         let width = meta.as_ref().map(|m| m.width).unwrap_or_default();
         let pinned = meta.as_ref().is_some_and(|m| !m.catalogue_closed);
         let note_path = id.to_string();
+        let in_page = !(self.single_file && self.sidebar_open);
         let editor = cx.new(|cx| {
             let mut e = Editor::new(doc, modified, width, window, cx);
             e.set_note_path(&note_path, cx);
             e.cat_pinned = pinned;
+            // A file window with its sidebar open keeps the outline there.
+            e.cat_in_page = in_page;
             if let Some(m) = &meta {
                 e.created = m.created;
                 e.info = m.info;
@@ -688,6 +711,9 @@ impl Workspace {
                     this.duplicate_doc(&id, window, cx);
                 }
             }
+            // The outline sits in the file window's sidebar, which this
+            // notify would not reach: redraw it here.
+            EditorEvent::Outline => cx.notify(),
             EditorEvent::Catalogue(pinned) => {
                 if let Some(id) = this.current.clone() {
                     if let Some(e) = this.entries.iter_mut().find(|e| e.id == id) {
@@ -706,6 +732,13 @@ impl Workspace {
                 e.meta.opened = m.opened;
             }
         self.editor = Some(editor);
+        if self.current.as_deref() != Some(id) {
+            // Another note means another folder (or another list in it).
+            self.siblings_stale = true;
+            if self.single_file && self.sidebar_open && self.file_page == crate::sidebar::FilePage::Files {
+                self.load_siblings(cx);
+            }
+        }
         self.current = Some(id.to_string());
         crate::quick_note::used(id, cx);
         self.reveal_in_tree(id);
@@ -1672,7 +1705,8 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // One file, one window: nothing but the page and its top bar.
+        // One file, one window: the page, its top bar, and — when open — a
+        // sidebar holding the outline rather than a library.
         if self.single_file {
             return self.render_single_file(window, cx).into_any_element();
         }
@@ -1755,15 +1789,9 @@ impl Render for Workspace {
                 w.shortcuts = !w.shortcuts;
                 cx.notify();
             }))
-            .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
+            .on_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
                 // The theme dropdown: ↑ ↓ preview, ↩ applies, Esc closes it (not 设置).
                 if w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx) {
-                    cx.stop_propagation();
-                    return;
-                }
-                // Esc leaves 设置 (unless its filter field has the caret).
-                if ev.keystroke.key == "escape" && w.view == View::Settings && !w.settings_filter.read(cx).is_focused(window) {
-                    w.close_settings(cx);
                     cx.stop_propagation();
                     return;
                 }
@@ -1777,8 +1805,15 @@ impl Render for Workspace {
                 }
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
-            .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
+            .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
                 if w.record_shortcut(ev, cx) { return; }
+                // Esc leaves 设置 (unless its filter field has the caret). Taken
+                // before the editor, which would otherwise swallow the key.
+                if ev.keystroke.key == "escape" && w.view == View::Settings && !w.settings_filter.read(cx).is_focused(window) {
+                    w.close_settings(cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 // Esc cancels a confirmation dialog.
                 if ev.keystroke.key == "escape" && w.confirm.is_some() {
                     w.confirm = None;
@@ -1860,6 +1895,7 @@ impl Workspace {
             _ => None,
         };
         let seg = crate::ui::header_icon;
+        let open = self.sidebar_open;
         let bar = div()
             .id("top-bar").relative()
             .h(px(HEADER_H))
@@ -1867,8 +1903,32 @@ impl Workspace {
             .flex()
             .items_center()
             .pr(px(crate::ui::header_right_inset()))
-            .pl(px(theme::TRAFFIC_LIGHTS_W))
+            // Clear of the traffic lights, which sit over the note when the
+            // sidebar is closed (exactly as the library window's bar does).
+            .pl(if open { px(18.) } else { px(theme::TRAFFIC_LIGHTS_W) })
             .title_bar()
+            .when(!open, |d| {
+                d.child(
+                    div()
+                        .id("file-open-sidebar")
+                        .no_drag()
+                        .flex_none()
+                        .ml(px(4.))
+                        .size(px(28.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(8.))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(Theme::fill_hover_strong()))
+                        .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                        .child(icon("panel-left-open", 17., Theme::icon()))
+                        .on_click(cx.listener(|w, _, _, cx| {
+                            w.sidebar_open = true;
+                            cx.notify();
+                        })),
+                )
+            })
             .child(
                 div().min_w_0().flex_1().flex().items_center().gap(px(12.))
                     .child(div().h(px(20.)).min_w_0().flex().items_center().text_size(px(13.)).line_height(px(20.)).child(self.title_el(title, cx)))
@@ -1890,21 +1950,78 @@ impl Workspace {
                         w.doc_sub = None;
                         cx.notify();
                     }))));
-        let page = crate::editor_theme::Theme::bg_body();
-        let body = div().flex_1().min_h_0().flex().child(
-            div().relative().flex_1().min_w_0().h_full().children(self.editor.clone()),
-        );
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().flex_col().bg(page)
-            .child(bar).child(body);
+        // 设置 takes the page, with its own sidebar, until 返回.
+        let settings = self.view == View::Settings;
+        let body: AnyElement = if settings {
+            self.render_settings(cx)
+        } else {
+            div().flex_1().min_h_0().flex().child(
+                div().relative().flex_1().min_w_0().h_full().children(self.editor.clone()),
+            ).into_any_element()
+        };
+        let page = if settings { Theme::bg_body() } else { crate::editor_theme::Theme::bg_body() };
+        // 设置 draws its own bar (and its own title); the note's bar would
+        // stack a second one above it.
+        let note = if settings {
+            div().id("note").relative().flex_1().min_w_0().h_full().flex().flex_col().bg(page).child(body)
+        } else {
+            div().id("note").relative().flex_1().min_w_0().h_full().flex().flex_col().bg(page).child(bar).child(body)
+        };
+        // The outline lives in the sidebar while it is open; the page keeps
+        // its own copy (and its margins) only when the sidebar is hidden.
+        if let Some(ed) = self.editor.clone() {
+            let in_page = !open;
+            ed.update(cx, |e, _| if e.cat_in_page != in_page { e.cat_in_page = in_page });
+        }
+        // 设置 opens the sidebar itself (`open_settings`); collapsing it
+        // leaves the page's own header with the toggle, like the library's.
+        let sidebar = if settings {
+            open.then(|| self.render_settings_sidebar(window, cx))
+        } else {
+            open.then(|| self.render_file_sidebar(window, cx))
+        };
+        let resize = (open || settings).then(|| self.resize_handle(self.sidebar_w(window), cx));
+        let resize_overlay = self.render_resize_overlay(cx);
         let doc_menu = self.render_doc_menu(window, cx);
         let confirm = self.render_confirm(cx);
         let toast = self.render_toast(window);
-        self.window_root(None, note.into_any_element(), window, cx)
+        self.window_root(sidebar, note.into_any_element(), window, cx)
+            .children(resize)
+            .children(resize_overlay)
+            .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
+                w.sidebar_open = !w.sidebar_open;
+                if w.sidebar_open && w.file_page == crate::sidebar::FilePage::Files {
+                    w.load_siblings(cx);
+                }
+                cx.notify();
+            }))
             .on_action(cx.listener(|w, _: &CloseWindow, window, cx| {
                 if w.save_before(cx, |_, window, _| window.remove_window()) { window.remove_window(); }
             }))
             .on_action(cx.listener(|w, _: &crate::app::ToggleSource, window, cx| w.toggle_source(window, cx)))
             .on_action(cx.listener(|w, _: &crate::app::FindInDoc, window, cx| w.find_in_doc(false, window, cx)))
+            // 设置 is the one page a file window can show: ⌘, and Esc out.
+            .on_action(cx.listener(|w, _: &OpenSettings, _, cx| w.open_settings(crate::settings::Page::General, cx)))
+            .on_action(cx.listener(|w, _: &OpenAbout, _, cx| w.open_settings(crate::settings::Page::About, cx)))
+            // The editor holds the caret, so Esc has to be taken before it
+            // sees the key (the library window layers the same two handlers).
+            .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
+                if ev.keystroke.key != "escape" {
+                    return;
+                }
+                if w.view == View::Settings && !w.settings_filter.read(cx).is_focused(window) {
+                    w.close_settings(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                if w.doc_info.is_some() || w.doc_menu {
+                    w.doc_info = None;
+                    w.doc_menu = false;
+                    w.doc_sub = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .on_action(cx.listener(|_, _: &OpenFile, _, cx| crate::open_file_dialog(cx)))
             .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| {
                 for p in paths.paths().iter().filter(|p| crate::vault::is_note_path(p)) {

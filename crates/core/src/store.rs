@@ -375,6 +375,12 @@ impl Store {
         self.vault.folders()
     }
 
+    /// The notes directly inside `folder`, by name: one `read_dir`, nothing
+    /// read. A file window's 文件 page lists the note's own folder with this.
+    pub fn siblings(&self, folder: Option<&str>) -> Vec<(String, String)> {
+        self.vault.siblings(folder)
+    }
+
     fn entry(&self, n: crate::vault::Note) -> Entry {
         let meta = self.notes.get(&n.path).cloned().unwrap_or_else(|| Meta {
             created: n.created,
@@ -794,6 +800,27 @@ mod tests {
         assert!(s.entry_at("../escape.md").is_none());
         // The full scan still finds everything when a library window asks.
         assert_eq!(s.list().len(), 52);
+    }
+
+    #[test]
+    fn siblings_lists_one_folder_without_recursing() {
+        let lib = Lib::new("siblings");
+        std::fs::write(lib.0.join("keeper.md"), "# Keeper\n\nbody\n").unwrap();
+        std::fs::write(lib.0.join("Other.markdown"), "# Other\n").unwrap();
+        std::fs::write(lib.0.join("notes.txt"), "x").unwrap();
+        std::fs::write(lib.0.join(".hidden.md"), "# Hidden\n").unwrap();
+        std::fs::create_dir(lib.0.join("sub")).unwrap();
+        std::fs::write(lib.0.join("sub/deep.md"), "# Deep\n").unwrap();
+        let s = lib.open();
+        // The vault root: two notes by name, no folders, no other files.
+        assert_eq!(
+            s.siblings(None),
+            vec![("keeper.md".to_string(), "keeper".to_string()), ("Other.markdown".to_string(), "Other".to_string())]
+        );
+        // One folder in, one folder's worth: nothing from the root.
+        assert_eq!(s.siblings(Some("sub")), vec![("sub/deep.md".to_string(), "deep".to_string())]);
+        // A folder that is not there is an empty list, not an error.
+        assert!(s.siblings(Some("nope")).is_empty());
     }
 
     #[test]

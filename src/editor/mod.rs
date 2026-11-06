@@ -1,6 +1,6 @@
 mod button;
 mod caption;
-mod catalogue;
+pub mod catalogue;
 mod countdown;
 mod cover;
 pub use hush_core::editor::core;

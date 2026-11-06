@@ -26,6 +26,9 @@ pub enum EditorEvent {
     Search(String),
     /// 展开目录 / 收起目录, remembered per document.
     Catalogue(bool),
+    /// The outline left the page and lives in the file window's sidebar:
+    /// the row that became current. Only the redraw matters, not which row.
+    Outline,
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
     /// A 反向引用 line: that document, scrolled to its nth block.
@@ -201,6 +204,16 @@ pub struct Editor {
     pub(super) layout: super::catalogue::PageLayout,
     /// 文档目录 pinned open (per document).
     pub cat_pinned: bool,
+    /// Whether the page draws its own outline. A file window with the
+    /// sidebar open puts it there instead (`outline_panel`), and the page
+    /// gets its margins back.
+    pub cat_in_page: bool,
+    /// The outline as the file window's sidebar draws it, rebuilt from
+    /// `cat_entries` only when the sidebar asks (`outline_panel`), so a
+    /// library window never clones it.
+    pub outline_rows: Rc<Vec<(super::catalogue::CatEntry, bool)>>,
+    /// What `outline_rows` was built from (generation, folds, width, rows).
+    pub(super) outline_key: Option<(Option<u64>, usize, u32, usize, (usize, usize))>,
     /// Child pages of the open document (kept current by the workspace).
     pub sub_pages: Vec<SubPage>,
     pub(super) cat_entries: Rc<Vec<super::catalogue::CatEntry>>,
@@ -208,7 +221,8 @@ pub struct Editor {
     pub(super) cat_generation: Option<u64>,
     /// Headings folded in the catalogue only.
     pub(super) cat_collapsed: std::collections::HashSet<BlockId>,
-    pub(super) cat_active: Option<BlockId>,
+    /// The current heading, for the outline (on the page or in the sidebar).
+    pub cat_active: Option<BlockId>,
     /// Active row the catalogue list was last scrolled to.
     pub(super) cat_shown_active: Option<BlockId>,
     /// Page scroll position and caret block of the last frame.
@@ -447,6 +461,9 @@ impl Editor {
             page_width,
             layout: Default::default(),
             cat_pinned: false,
+            cat_in_page: true,
+            outline_rows: Rc::default(),
+            outline_key: None,
             sub_pages: vec![],
             cat_entries: Rc::default(),
             cat_generation: None,

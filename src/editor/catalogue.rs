@@ -1,5 +1,6 @@
-//! 文档目录: the heading outline at the top left of the page, and the page
-//! margins that make room for it.
+//! 文档目录: the heading outline at the top left of the page (or, in a file
+//! window with its sidebar open, in that sidebar), and the page margins that
+//! make room for it.
 
 use super::core::TITLE;
 use super::render::{TOP, flattens, visible_with_gaps};
@@ -138,13 +139,19 @@ pub fn entries(doc: &Document) -> Vec<CatEntry> {
     let mut levels: Vec<u8> = raw.iter().map(|r| r.2).collect();
     levels.sort();
     levels.dedup();
-    let title = crate::settings::display_title(&doc.title.text);
-    // The 文档图标 leads the title entry.
-    let title = match &doc.icon {
-        Some(icon) => format!("{icon} {title}"),
-        None => title.to_string(),
-    };
-    let mut out = vec![CatEntry { id: TITLE, text: title.into(), level: 1, h1: false, item: 0 }];
+    let mut out = vec![];
+    // A Markdown file has no title slot: its first heading *is* the title, so
+    // there is no separate row to head the outline with. Only a document that
+    // carries a real title (an imported one without a first heading) gets one.
+    if !doc.title.text.trim().is_empty() {
+        let title = crate::settings::display_title(&doc.title.text);
+        // The 文档图标 leads the title entry.
+        let title = match &doc.icon {
+            Some(icon) => format!("{icon} {title}"),
+            None => title,
+        };
+        out.push(CatEntry { id: TITLE, text: title.into(), level: 1, h1: false, item: 0 });
+    }
     out.extend(raw.into_iter().map(|(id, text, l, item)| CatEntry {
         id,
         text: text.replace('\n', " ").into(),
@@ -188,22 +195,186 @@ impl Editor {
 
     /// Recomputes the outline and the page margins for this frame.
     pub(super) fn update_catalogue(&mut self) {
+        self.outline();
+        let o = f32::from(self.pane_size().width);
+        // With the outline in the sidebar the page has nothing to make room
+        // for: it goes back to the centred column.
+        self.layout = page_layout(o, self.column_max(), self.cat_in_page, self.cat_pinned);
+    }
+
+    /// The outline itself, rebuilt only when the document changed. The page
+    /// catalogue and the file window's sidebar read the same list.
+    fn outline(&mut self) {
         if self.cat_generation != Some(self.core.generation) {
             self.cat_generation = Some(self.core.generation);
             self.cat_entries = Rc::new(entries(&self.core.doc));
         }
-        let o = f32::from(self.pane_size().width);
-        self.layout = page_layout(o, self.column_max(), true, self.cat_pinned);
+    }
+
+    /// The outline as the file window's sidebar shows it: the page's own
+    /// rows, at this width, inside `height`.
+    pub(crate) fn outline_panel(&mut self, width: f32, height: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.outline();
+        if self.cat_entries.is_empty() {
+            return div()
+                .w_full()
+                .px(px(6.))
+                .py(px(8.))
+                .text_size(px(13.))
+                .line_height(px(20.))
+                .text_color(Theme::text_placeholder())
+                .child(crate::settings::tr("没有小标题", "No headings"))
+                .into_any_element();
+        }
+        self.outline_view(width, height, window, cx)
+    }
+
+    /// Rows after catalogue-only folding: everything deeper than a folded
+    /// row is hidden. Cheap and not worth caching — a sidebar redraw with a
+    /// hundred headings is a hundred comparisons.
+    fn fold_outline(&self) -> Vec<(CatEntry, bool)> {
+        let entries = self.cat_entries.clone();
+        let mut rows: Vec<(CatEntry, bool)> = vec![];
+        let mut hide_below: Option<usize> = None;
+        for (i, e) in entries.iter().enumerate() {
+            if let Some(l) = hide_below {
+                if e.level > l {
+                    continue;
+                }
+                hide_below = None;
+            }
+            let parent = e.id != TITLE && entries.get(i + 1).is_some_and(|n| n.level > e.level);
+            if parent && self.cat_collapsed.contains(&e.id) {
+                hide_below = Some(e.level);
+            }
+            rows.push((e.clone(), parent));
+        }
+        rows
+    }
+
+    /// The sidebar's outline. `uniform_list` needs its rows to be an owned
+    /// `Rc` that outlives the frame, so they are rebuilt only when the
+    /// document, the folds or the width we shape the text for changed: a
+    /// redraw from scrolling reuses them, and `cat_active` — read inside the
+    /// closure — stays live.
+    fn outline_view(&mut self, width: f32, height: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let rows = self.fold_outline();
+        // The last row's indent + trailing padding: the width the longest
+        // label can occupy before it is ellipsized.
+        let key = (self.cat_generation, self.cat_collapsed.len(), width.to_bits(), rows.len(), rows.last().map(|(e, _)| (e.level, e.text.len())).unwrap_or_default());
+        if Some(key) != self.outline_key {
+            self.outline_key = Some(key);
+            self.outline_rows = Rc::new(rows);
+        }
+        let active = self.cat_active;
+        if active != self.cat_shown_active {
+            self.cat_shown_active = active;
+            if let Some(ix) = self.outline_rows.iter().position(|(e, _)| Some(e.id) == active) {
+                self.cat_scroll.scroll_to_item(ix, ScrollStrategy::Top);
+            }
+        }
+        let collapsed = self.cat_collapsed.clone();
+        let rows = self.outline_rows.clone();
+        let mut style = window.text_style();
+        style.font_family = theme::UI_FONT.into();
+        let entity = cx.entity();
+        let n = rows.len();
+        let text_w = width - 11.;
+        let scroll_handle = self.cat_scroll.clone();
+        let list = uniform_list("outline-list", n, move |range, window, _| {
+            range
+                .map(|ix| {
+                    let (e, parent) = &rows[ix];
+                    let folded = collapsed.contains(&e.id);
+                    let title = e.id == TITLE;
+                    let size = if title { 14. } else { 13. };
+                    let indent = INDENT * (e.level - 1) as f32;
+                    let avail = text_w - indent - 16.;
+                    let runs = crate::editor_ui::ui_runs(&e.text, &TextStyle { font_size: px(size).into(), ..style.clone() }, &[], style.color);
+                    let full_w = window.text_system().shape_line(e.text.clone(), px(size), &runs, None).width;
+                    let on = Some(e.id) == active;
+                    let color = if on { Theme::text() } else { Theme::text_caption() };
+                    let (id, ent, ent2) = (e.id, entity.clone(), entity.clone());
+                    let group = SharedString::from(format!("outline-row-{ix}"));
+                    let row = div()
+                        .id(("outline-row", ix))
+                        .group(group.clone())
+                        .w(px(text_w))
+                        .h(px(ROW_H))
+                        .pb(px(8.))
+                        .pl(px(indent))
+                        .flex()
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .id(("outline-fold", ix))
+                                .flex_none()
+                                .w(px(16.))
+                                .h(px(22.))
+                                .px(px(3.))
+                                .py(px(6.))
+                                .when(*parent, |d| {
+                                    d.child(
+                                        div()
+                                            .size(px(10.))
+                                            .when(!folded, |d| d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)))
+                                            .child(
+                                                icon(if folded { "triangle-right" } else { "triangle-down" }, 10., Theme::text_placeholder())
+                                                    .hover(|s| s.text_color(Theme::text())),
+                                            ),
+                                    )
+                                    .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        ent2.update(cx, |ed, cx| {
+                                            if !ed.cat_collapsed.remove(&id) {
+                                                ed.cat_collapsed.insert(id);
+                                            }
+                                            cx.notify();
+                                        });
+                                    })
+                                }),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .h(px(22.))
+                                .text_size(px(size))
+                                .line_height(px(22.))
+                                .when(title || e.h1 || on, |d| d.font_weight(FontWeight::SEMIBOLD))
+                                .text_color(color)
+                                .hover(|s| s.text_color(Theme::text()))
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(ui_text(e.text.clone())),
+                        )
+                        .on_click(move |_, _, cx| ent.update(cx, |ed, cx| ed.jump_to_heading(id, cx)));
+                    if f32::from(full_w) > avail { row.tip_label(e.text.to_string(), TipSide::Right) } else { row }
+                })
+                .collect()
+        })
+        .track_scroll(scroll_handle)
+        .w(px(width - 11.))
+        .h(px(height.max(ROW_H)));
+        div().w(px(width)).child(list).into_any_element()
     }
 
     /// Scroll-spy: the last heading at most 90px below the viewport top. A
     /// caret move without scrolling selects the heading above the caret.
     /// Runs at paint time, once this frame's block bounds are known; returns
     /// whether the active row changed.
-    pub(super) fn update_active(&mut self) -> bool {
+    pub(super) fn update_active(&mut self, cx: &mut Context<Self>) -> bool {
         let before = self.cat_active;
         self.spy();
-        self.cat_active != before
+        let changed = self.cat_active != before;
+        // The sidebar draws the outline in its own entity, which this notify
+        // would not reach; only a window with the outline out of the page
+        // needs the event, so a library window never pays for it.
+        if changed && !self.cat_in_page {
+            cx.emit(EditorEvent::Outline);
+        }
+        changed
     }
 
     fn spy(&mut self) {
@@ -258,7 +429,7 @@ impl Editor {
         cx.notify();
     }
 
-    fn jump_to_heading(&mut self, id: BlockId, cx: &mut Context<Self>) {
+    pub(crate) fn jump_to_heading(&mut self, id: BlockId, cx: &mut Context<Self>) {
         self.cat_active = Some(id);
         self.cat_jump = Some(id);
         if id == TITLE {
@@ -275,6 +446,9 @@ impl Editor {
     }
 
     pub(super) fn render_catalogue(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.cat_in_page {
+            return None;
+        }
         let mode = self.layout.cat;
         if mode == CatMode::None {
             return None;
@@ -334,23 +508,7 @@ impl Editor {
     }
 
     fn catalogue_list(&mut self, width: f32, max_h: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // Catalogue-only folding: hide everything deeper below a folded row.
-        let entries = self.cat_entries.clone();
-        let mut rows: Vec<(CatEntry, bool)> = vec![];
-        let mut hide_below: Option<usize> = None;
-        for (i, e) in entries.iter().enumerate() {
-            if let Some(l) = hide_below {
-                if e.level > l {
-                    continue;
-                }
-                hide_below = None;
-            }
-            let parent = e.id != TITLE && entries.get(i + 1).is_some_and(|n| n.level > e.level);
-            if parent && self.cat_collapsed.contains(&e.id) {
-                hide_below = Some(e.level);
-            }
-            rows.push((e.clone(), parent));
-        }
+        let rows = self.fold_outline();
         let active = self.cat_active;
         if active != self.cat_shown_active {
             self.cat_shown_active = active;

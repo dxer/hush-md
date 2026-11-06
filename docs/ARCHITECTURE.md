@@ -107,13 +107,21 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 
 ## 打开一个文件
 
-`hush_md 笔记.md`、Finder / 资源管理器里双击，或应用内的「打开文件…」都走 `main.rs` 的 `open_file_window`：一个新窗口，`Workspace::single_file` 为真，没有侧栏、主页和搜索，只有顶栏和这一篇。
+`hush_md 笔记.md`、Finder / 资源管理器里双击，或应用内的「打开文件…」都走 `main.rs` 的 `open_file_window`：一个新窗口，`Workspace::single_file` 为真，没有主页和搜索，只有顶栏、这一篇，以及可收起的侧栏。
 
 - 文件的**所在文件夹**被当作笔记库（`store::set_root`），所以笔记旁边的 `assets/`、相对链接都按 Markdown 的规矩解析。
 - 这个选择是进程级的，所以运行中再打开文件会**另起一个进程**，不会把已打开的资料库指到别处。
 - 单文件窗口不播种欢迎笔记，也不往文件夹里写任何东西。
 - **把 `.md` 拖进窗口是打开，不是插入。** 在已打开的资料库里拖入本库的笔记就直接切过去；拖入别处的文件另开一个窗口；单文件窗口里则换成那个文件。图片和其他文件仍然按原来的方式插入。
 - 安装包声明了 `.md` / `.markdown` 的文件类型（macOS `CFBundleDocumentTypes`，Windows `OpenWithProgids`），系统才会把双击交给我们。
+
+### 侧栏
+
+单文件窗口的侧栏**默认收起**（`⌘]` 或顶栏按钮展开），底部两个页签加一个设置按钮：
+
+- **大纲**：就是页面内那份 `文档目录`（`editor/catalogue.rs` 的 `entries`），同一个滚动跟随、同样的折叠，只是搬到了侧栏。所以侧栏开着时页面内不再画目录，正文回到居中；收起时目录按钮和它的留白回来。`Editor::cat_in_page` 表示这件事，监听 `EditorEvent::Outline` 让 Workspace 在滚动跨过标题时重绘。
+- **文件**：当前笔记**所在文件夹**里的其他 `.md`，只有一层（`Vault::siblings`，一次 `read_dir`，不读内容、不递归）。切换到这一页时才扫，换笔记或窗口重新获得焦点时置脏重扫。这一条是刻意的：递归扫描正是 v0.1.2 从启动路径里拿掉的东西。
+- 侧栏宽度与资料库窗口共用 `settings.json` 的 `sidebar_width`，`⌘]` 同样是收放。
 
 ## 界面语言
 

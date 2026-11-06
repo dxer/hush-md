@@ -500,7 +500,16 @@ impl Workspace {
         self.theme_menu = None;
         self.settings_scroll.set_offset(point(px(0.), px(0.)));
         self.shortcut_error = None;
-        if self.view != View::Settings { self.show_view(View::Settings, cx); }
+        if self.view != View::Settings {
+            // `show_view` refuses everything but the page in a file window:
+            // 设置 still opens, with its own nav in the sidebar.
+            if self.single_file {
+                self.view = View::Settings;
+                self.sidebar_open = true;
+            } else {
+                self.show_view(View::Settings, cx);
+            }
+        }
         cx.notify();
     }
 
@@ -548,14 +557,26 @@ impl Workspace {
             .child(bar_button("settings-collapse", if open { "panel-left-close" } else { "panel-left-open" })
                 .tip(if open { tr("收起侧栏", "Hide sidebar") } else { tr("展开侧栏", "Show sidebar") }, Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
                 .on_click(cx.listener(|w, _, _, cx| { w.sidebar_open = !w.sidebar_open; cx.notify(); })))
-            .child(bar_button("settings-home", "home").tip(tr("返回主页", "Home"), Some(crate::shortcuts::hint("workspace::GoHome", "⌘ + ⌥ + Home")))
-                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))
+            // A file window has no 主页 to go back to.
+            .when(!self.single_file, |d| d.child(bar_button("settings-home", "home").tip(tr("返回主页", "Home"), Some(crate::shortcuts::hint("workspace::GoHome", "⌘ + ⌥ + Home")))
+                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx)))))
             .into_any_element()
     }
 
     /// Back to where 设置 was opened from.
     pub(crate) fn close_settings(&mut self, cx: &mut Context<Self>) {
         let back = if self.editor.is_some() && self.current.is_some() { View::Doc } else { View::Home };
+        if self.single_file {
+            // `show_view` refuses the switch out of a file window, so set it
+            // straight; 返回 goes to the page it came from.
+            self.view = back;
+            self.cancel_shortcut_recording(cx);
+            self.row_menu = None;
+            self.theme_menu = None;
+            self.home.sort_menu = false;
+            cx.notify();
+            return;
+        }
         self.show_view(back, cx);
     }
 
@@ -715,6 +736,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "置顶" => "Pinned",
         "收藏" => "Favorites",
         "设置" => "Settings",
+        "大纲" => "Outline",
+        "文件" => "Files",
         "新建" => "New",
         "新建文档" => "New document",
         "新建文件夹" => "New folder",

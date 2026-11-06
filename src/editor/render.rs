@@ -1615,7 +1615,7 @@ impl Editor {
                     ed.start_thumbs(cx);
                     // A notify during the draw is dropped (even a deferred
                     // one); send it from a task, after the frame.
-                    if ed.update_active() {
+                    if ed.update_active(cx) {
                         cx.spawn(async |this, cx| this.update(cx, |_, cx| cx.notify())).detach();
                     }
                     ed.apply_reveal(window);
